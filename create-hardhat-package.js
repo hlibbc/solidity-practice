@@ -1,4 +1,4 @@
-// create-hardhat-package.js
+// create-hardhat-foundry-package.js
 
 const fs = require("fs");
 const path = require("path");
@@ -7,7 +7,7 @@ const { execSync } = require("child_process");
 const projectName = process.argv[2];
 
 if (!projectName) {
-  console.error("❌ 프로젝트 이름을 인자로 넘겨주세요. 예: node create-hardhat-package.js prj04");
+  console.error("❌ 프로젝트 이름을 인자로 넘겨주세요. 예: node create-hardhat-foundry-package.js proj04");
   process.exit(1);
 }
 
@@ -24,6 +24,8 @@ fs.mkdirSync(projectPath, { recursive: true });
 fs.mkdirSync(path.join(projectPath, "contracts"));
 fs.mkdirSync(path.join(projectPath, "scripts"));
 fs.mkdirSync(path.join(projectPath, "test"));
+fs.mkdirSync(path.join(projectPath, "foundry", "test"), { recursive: true });
+fs.mkdirSync(path.join(projectPath, "lib")); // forge install용
 
 // package.json 생성
 const packageJson = {
@@ -74,8 +76,43 @@ contract Example {
 
 fs.writeFileSync(path.join(projectPath, "contracts", "Example.sol"), exampleContract);
 
-// 자동으로 pnpm install 실행
+// foundry.toml 생성
+const foundryToml = `[profile.default]
+src = "contracts"
+test = "foundry/test"
+out = "foundry/out"
+libs = ["lib"]
+auto_detect_remappings = true
+`;
+
+fs.writeFileSync(path.join(projectPath, "foundry.toml"), foundryToml);
+
+// remappings.txt 생성
+fs.writeFileSync(path.join(projectPath, "remappings.txt"), [
+  "@contracts/=contracts/",
+  "@lib/=lib/"
+].join("\n"));
+
+
+// .gitignore 추가/수정
+const gitignorePath = path.join(projectPath, ".gitignore");
+const gitignoreContent = `node_modules
+foundry/out
+foundry/cache
+.env
+`;
+
+fs.writeFileSync(gitignorePath, gitignoreContent);
+
+// Foundry forge-std 설치
 console.log("📦 의존성 설치 중...");
 execSync("pnpm install", { cwd: projectPath, stdio: "inherit" });
 
-console.log(`✅ 프로젝트 생성 완료: projects/${projectName}`);
+console.log("📦 Foundry 유틸 설치 중 (forge-std)...");
+execSync("forge install foundry-rs/forge-std --no-commit", {
+  cwd: projectPath,
+  stdio: "inherit",
+});
+
+
+console.log(`✅ Hardhat + Foundry 프로젝트 생성 완료: projects/${projectName}`);

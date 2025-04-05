@@ -46,6 +46,18 @@ importers:
         specifier: ^2.22.19
         version: 2.22.19(ts-node@10.9.2(@types/node@22.13.11)(typescript@5.8.2))(typescript@5.8.2)
 
+  projects/proj04:
+    devDependencies:
+      '@nomicfoundation/hardhat-toolbox':
+        specifier: ^3.0.0
+        version: 3.0.0(2d3abb387c20b834f0438128392bbac2)
+      dotenv:
+        specifier: ^16.0.0
+        version: 16.4.7
+      hardhat:
+        specifier: ^2.22.0
+        version: 2.22.19(ts-node@10.9.2(@types/node@22.13.11)(typescript@5.8.2))(typescript@5.8.2)
+
 packages:
 
   '@adraffy/ens-normalize@1.10.1':

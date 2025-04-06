@@ -34,6 +34,21 @@ importers:
         specifier: ^2.22.0
         version: 2.22.19(ts-node@10.9.2(@types/node@22.13.11)(typescript@5.8.2))(typescript@5.8.2)
 
+  projects/eip-2612:
+    devDependencies:
+      '@nomicfoundation/hardhat-toolbox':
+        specifier: ^3.0.0
+        version: 3.0.0(2d3abb387c20b834f0438128392bbac2)
+      '@openzeppelin/contracts':
+        specifier: ^5.2.0
+        version: 5.2.0
+      dotenv:
+        specifier: ^16.0.0
+        version: 16.4.7
+      hardhat:
+        specifier: ^2.22.0
+        version: 2.22.19(ts-node@10.9.2(@types/node@22.13.11)(typescript@5.8.2))(typescript@5.8.2)
+
   projects/event-advanced:
     dependencies:
       '@nomicfoundation/hardhat-toolbox':
@@ -44,18 +59,6 @@ importers:
         version: 16.4.7
       hardhat:
         specifier: ^2.22.19
-        version: 2.22.19(ts-node@10.9.2(@types/node@22.13.11)(typescript@5.8.2))(typescript@5.8.2)
-
-  projects/proj04:
-    devDependencies:
-      '@nomicfoundation/hardhat-toolbox':
-        specifier: ^3.0.0
-        version: 3.0.0(2d3abb387c20b834f0438128392bbac2)
-      dotenv:
-        specifier: ^16.0.0
-        version: 16.4.7
-      hardhat:
-        specifier: ^2.22.0
         version: 2.22.19(ts-node@10.9.2(@types/node@22.13.11)(typescript@5.8.2))(typescript@5.8.2)
 
 packages:
@@ -423,6 +426,9 @@ packages:
   '@nomicfoundation/solidity-analyzer@0.1.2':
     resolution: {integrity: sha512-q4n32/FNKIhQ3zQGGw5CvPF6GTvDCpYwIf7bEY/dZTZbgfDsHyjJwURxUJf3VQuuJj+fDIFl4+KkBVbw4Ef6jA==}
     engines: {node: '>= 12'}
+
+  '@openzeppelin/contracts@5.2.0':
+    resolution: {integrity: sha512-bxjNie5z89W1Ea0NZLZluFh8PrFNn9DH8DQlujEok2yjsOlraUPKID5p1Wk3qdNbf6XkQ1Os2RvfiHrrXLHWKA==}
 
   '@scure/base@1.1.9':
     resolution: {integrity: sha512-8YKhl8GHiNI/pU2VMaofa2Tor7PJRAjwQLBBuilkJ9L5+13yVbC7JO/wS7piioAvPSwR3JKM1IJ/u4xQzbcXKg==}
@@ -2746,6 +2752,8 @@ snapshots:
       '@nomicfoundation/solidity-analyzer-linux-x64-gnu': 0.1.2
       '@nomicfoundation/solidity-analyzer-linux-x64-musl': 0.1.2
       '@nomicfoundation/solidity-analyzer-win32-x64-msvc': 0.1.2
+
+  '@openzeppelin/contracts@5.2.0': {}
 
   '@scure/base@1.1.9': {}
 

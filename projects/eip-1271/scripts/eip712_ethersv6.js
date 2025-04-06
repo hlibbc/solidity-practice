@@ -10,7 +10,7 @@
 const hre = require("hardhat");
 
 // ethers v6 utilities
-const { TypedDataEncoder, Wallet, hexlify, concat, getBytes } = require("ethers");
+const { TypedDataEncoder, Wallet, Signature, hexlify, concat, getBytes } = require("ethers");
 
 const signerPrivateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const otherPrivateKey  = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
@@ -51,7 +51,7 @@ async function main() {
         };
         const wallet = new Wallet(signerPrivateKey, hre.ethers.provider);
         const digest = TypedDataEncoder.hash(domain, { Order: types.Order }, value);
-        const signature = wallet.signingKey.sign(digest)
+        const signature = await wallet.signingKey.sign(digest)
         const r = signature.r;
         const s = signature.s;
         const v = 27 + signature.yParity; // yParity: 0 or 1 → v: 27 or 28
@@ -60,7 +60,19 @@ async function main() {
             getBytes(s),
             Uint8Array.from([v]) // ✅ v를 1바이트짜리 BytesLike로 변환
         ]));
+        console.log("signature:", JSON.stringify(signature, null, 2));
+        console.log(`rawSignature: ${rawSignature}`)
+
+        const cmpSignature = await wallet.signTypedData(domain, { Order: types.Order }, value);
+        console.log(`cmpSignature: ${cmpSignature}`)
         
+        console.log('parse cmpSignature to Signature struct...')
+        const parsedSig = Signature.from(cmpSignature);
+
+        console.log('parsedSig.r: ', parsedSig.r);        // r 값
+        console.log('parsedSig.s: ', parsedSig.s);        // s 값
+        console.log('parsedSig.v: ', parsedSig.v);        // 27 또는 28
+        console.log('parsedSig.yParity: ', parsedSig.yParity);  // 0 또는 1
 
         const recovered = hre.ethers.verifyTypedData(domain, { Order: types.Order }, value, rawSignature);
 

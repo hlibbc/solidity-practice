@@ -28,6 +28,7 @@ fs.mkdirSync(path.join(projectPath, "foundry", "test"), { recursive: true });
 fs.mkdirSync(path.join(projectPath, "lib")); // forge install용
 
 // package.json 생성
+console.log("📦 package.json 생성 중...");
 const packageJson = {
   name: projectName,
   version: "1.0.0",
@@ -39,17 +40,40 @@ const packageJson = {
   devDependencies: {
     hardhat: "^2.22.0",
     "@nomicfoundation/hardhat-toolbox": "^3.0.0",
+    "@openzeppelin/contracts": "^5.2.0",
     dotenv: "^16.0.0"
   }
 };
-
 fs.writeFileSync(
   path.join(projectPath, "package.json"),
   JSON.stringify(packageJson, null, 2)
 );
+// .gitignore 추가/수정
+console.log("📦 .gitignore 생성 중...");
+const gitignorePath = path.join(projectPath, ".gitignore");
+const gitignoreContent = `node_modules
+foundry/out
+foundry/cache
+.env
+`;
+fs.writeFileSync(gitignorePath, gitignoreContent);
+
+// contracts/Example.sol 생성
+console.log("📦 contracts/Example.sol 생성 중...");
+const exampleContract = `
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract Example {
+    string public greet = "Hello from ${projectName}!";
+}
+`;
+fs.writeFileSync(path.join(projectPath, "contracts", "Example.sol"), exampleContract);
 
 // hardhat.config.js 생성
-const configContent = `require("@nomicfoundation/hardhat-toolbox");
+console.log("📦 hardhat: hardhat.config.js 생성 중...");
+const configContent = `
+require("@nomicfoundation/hardhat-toolbox");
 require("dotenv").config({ path: require("path").resolve(__dirname, "../../.env") });
 
 module.exports = {
@@ -62,21 +86,10 @@ module.exports = {
   }
 };
 `;
-
 fs.writeFileSync(path.join(projectPath, "hardhat.config.js"), configContent);
 
-// contracts/Example.sol 생성
-const exampleContract = `// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
-
-contract Example {
-    string public greet = "Hello from ${projectName}!";
-}
-`;
-
-fs.writeFileSync(path.join(projectPath, "contracts", "Example.sol"), exampleContract);
-
 // foundry.toml 생성
+console.log("📦 foundry: foundry.toml 생성 중...");
 const foundryToml = `[profile.default]
 src = "contracts"
 test = "foundry/test"
@@ -88,21 +101,12 @@ auto_detect_remappings = true
 fs.writeFileSync(path.join(projectPath, "foundry.toml"), foundryToml);
 
 // remappings.txt 생성
+console.log("📦 foundry: remappings.txt 생성 중...");
 fs.writeFileSync(path.join(projectPath, "remappings.txt"), [
   "@contracts/=contracts/",
-  "@lib/=lib/"
+  "@lib/=lib/",
+  "@openzeppelin/=lib/openzeppelin-contracts/"
 ].join("\n"));
-
-
-// .gitignore 추가/수정
-const gitignorePath = path.join(projectPath, ".gitignore");
-const gitignoreContent = `node_modules
-foundry/out
-foundry/cache
-.env
-`;
-
-fs.writeFileSync(gitignorePath, gitignoreContent);
 
 // Foundry forge-std 설치
 console.log("📦 의존성 설치 중...");
@@ -113,6 +117,9 @@ execSync("forge install foundry-rs/forge-std --no-commit", {
   cwd: projectPath,
   stdio: "inherit",
 });
-
-
+console.log("📦 Foundry 유틸 설치 중 (openzeppelin)...");
+execSync("forge install OpenZeppelin/openzeppelin-contracts --no-commit", {
+  cwd: projectPath,
+  stdio: "inherit",
+});
 console.log(`✅ Hardhat + Foundry 프로젝트 생성 완료: projects/${projectName}`);

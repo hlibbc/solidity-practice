@@ -19,3 +19,9 @@
 [submodule "projects/nested-struct-sig/lib/openzeppelin-contracts"]
 	path = projects/nested-struct-sig/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/meta-transaction/lib/forge-std"]
+	path = projects/meta-transaction/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/meta-transaction/lib/openzeppelin-contracts"]
+	path = projects/meta-transaction/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

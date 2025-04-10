@@ -5,6 +5,7 @@ async function deployContracts() {
 
     const Forwarder = await ethers.getContractFactory("MyForwarder");
     const forwarder = await Forwarder.deploy();
+    console.log("Forwarder tx hash:", forwarder.deploymentTransaction().hash);
     await forwarder.waitForDeployment();
     console.log("Forwarder deployed to:", await forwarder.getAddress());
 

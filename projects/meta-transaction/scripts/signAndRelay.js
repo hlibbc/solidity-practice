@@ -1,59 +1,35 @@
 const hre = require("hardhat");
 const { ethers } = hre;
-const { deployContracts } = require("./deployContracts");
-const fs = require("fs");
-const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, "../.env") });
-
-async function loadDeployedContracts() {
-    const forwarder = await ethers.getContractAt("MyForwarder", process.env.FORWARDER_ADDRESS);
-    const receiver = await ethers.getContractAt("MetaTxReceiver", process.env.RECEIVER_ADDRESS);
-    return { forwarder, receiver };
-}
+require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") });
 
 async function main() {
     const [user, relayer] = await ethers.getSigners();
 
-    let forwarder, receiver;
-    const deployMode = process.argv.includes("--deploy");
+    const forwarderAddress = process.env.FORWARDER_ADDRESS;
+    const receiverAddress = process.env.RECEIVER_ADDRESS;
 
-    if (deployMode) {
-        ({ forwarder, receiver } = await deployContracts());
+    const Forwarder = await ethers.getContractFactory("MyForwarder");
+    const Receiver = await ethers.getContractFactory("MetaTxReceiver");
 
-        const envData = `FORWARDER_ADDRESS=${await forwarder.getAddress()}
-RECEIVER_ADDRESS=${await receiver.getAddress()}
-`;
-        fs.writeFileSync(path.join(__dirname, "../.env"), envData);
-        console.log("Contracts deployed and addresses written to .env");
-    } else {
-        ({ forwarder, receiver } = await loadDeployedContracts());
-    }
+    const forwarder = new ethers.Contract(forwarderAddress, Forwarder.interface, relayer);
+    const receiver = await Receiver.attach(receiverAddress);
 
-    const chainId = (await ethers.provider.getNetwork()).chainId;
+    console.log("Forwarder Address:", forwarderAddress);
+    console.log("Receiver Address:", receiverAddress);
+
+    // Prepare meta-transaction
+    const message = "Hello from ERC2771 meta-tx";
+    const data = receiver.interface.encodeFunctionData("setMessage", [message]);
     const nonce = await forwarder.nonces(user.address);
-    const deadline = Math.floor(Date.now() / 1000) + 60 * 60;
-    const gasLimit = 100000;
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
+    const chainId = (await ethers.provider.getNetwork()).chainId;
 
-    const data = receiver.interface.encodeFunctionData("setMessage", [
-        "Hello from ERC2771 meta-tx",
-    ]);
-
-    const request = {
-        from: user.address,
-        to: await receiver.getAddress(),
-        value: 0,
-        gas: gasLimit,
-        nonce: nonce.toNumber(),
-        deadline,
-        data,
-        signature: "" // placeholder, to be added after signing
-    };
-
+    // Prepare typed data
     const domain = {
-        name: await forwarder.name(),
+        name: "MyForwarder",
         version: "1",
         chainId,
-        verifyingContract: await forwarder.getAddress(),
+        verifyingContract: forwarderAddress,
     };
 
     const types = {
@@ -68,28 +44,39 @@ RECEIVER_ADDRESS=${await receiver.getAddress()}
         ],
     };
 
-    const signature = await user.signTypedData(domain, types, {
-        from: request.from,
-        to: request.to,
-        value: request.value,
-        gas: request.gas,
-        nonce: request.nonce,
-        deadline: request.deadline,
-        data: request.data,
-    });
+    const requestToSign = {
+        from: user.address,
+        to: receiverAddress,
+        value: 0,
+        gas: 100000,
+        nonce,
+        deadline,
+        data,
+    };
 
-    request.signature = signature;
+    const signature = await user.signTypedData(domain, types, requestToSign);
 
-    const forwarderConnected = forwarder.connect(relayer);
-    const tx = await forwarderConnected.execute(request, {
-        gasLimit: request.gas,
-    });
-    await tx.wait();
+    const request = {
+        ...requestToSign,
+        signature,
+    };
 
-    const [msg, sender] = await receiver.getMessage();
-    console.log("✅ MetaTx Success:");
-    console.log("Message:", msg);
-    console.log("Original Sender:", sender);
+    console.log("Request:", request);
+    console.log("Signature:", signature);
+    console.log("Relayer:", relayer.address);
+
+    // Execute meta-tx
+    try {
+        const tx = await forwarder.connect(relayer).execute(request, { value: 0 });
+        const receipt = await tx.wait();
+        console.log("Meta-tx relayed! Hash:", tx.hash);
+        console.log("Gas used:", receipt.gasUsed.toString());
+    } catch (err) {
+        console.error("Error relaying meta-tx:", err);
+    }
 }
 
-main().catch(console.error);
+main().catch((err) => {
+    console.error("Script failed:", err);
+    process.exit(1);
+});

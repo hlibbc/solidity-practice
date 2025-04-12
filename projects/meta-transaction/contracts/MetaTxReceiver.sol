@@ -12,13 +12,13 @@ contract MetaTxReceiver is ERC2771Context {
 
     constructor(address forwarder) ERC2771Context(forwarder) {}
 
-    function setMessage(string calldata newMessage) external {
+    function setMessage(string calldata newMessage) external payable {
         message = newMessage;
         lastSender = _msgSender();
-        emit MetaTxDebug(_msgSender(), msg.data); // 🪵 디버깅 로그
+        emit MetaTxDebug(_msgSender(), msg.data);
         emit MessageUpdated(newMessage, _msgSender());
     }
-
+    
     function _msgSender() internal view override returns (address sender) {
         return super._msgSender();
     }
@@ -26,4 +26,4 @@ contract MetaTxReceiver is ERC2771Context {
     function _msgData() internal view override returns (bytes calldata) {
         return super._msgData();
     }
-}
+} 

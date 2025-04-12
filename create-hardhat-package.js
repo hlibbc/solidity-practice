@@ -71,6 +71,13 @@ contract Example {
 fs.writeFileSync(path.join(projectPath, "contracts", "Example.sol"), exampleContract);
 
 // hardhat.config.js 생성
+/**
+ * jhhong comments
+ * defaultNetwork: "development", 을 명시하면 hardhat test 시 인메모리 임시노드를 띄우지 않고 외부 노드를 명시적으로 찾는다.
+ * 그래서 다른창에 노드 안돌리고 하면 hardhat test 시 에러남
+ * defaultNetwork: 을 명시했던 이유는 일반 script 파일 실행 시 --network 옵션을 안주려고 그랬던 거였음
+ * - defaultNetwork: 명시하고 --network 옵션 안주면 defaultNetwork: 에 명시된 network으로 연결시도함
+ */
 console.log("📦 hardhat: hardhat.config.js 생성 중...");
 const configContent = `
 require("@nomicfoundation/hardhat-toolbox");
@@ -78,7 +85,7 @@ require("dotenv").config({ path: require("path").resolve(__dirname, "../../.env"
 
 module.exports = {
   solidity: "0.8.20",
-  defaultNetwork: "development", 
+  // defaultNetwork: "development", // --network 생략하려면 필요. but 무조건 외부 provider 띄워야 함
   networks: {
     development: {
       url: \`http://127.0.0.1:8545\`

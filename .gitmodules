@@ -25,3 +25,9 @@
 [submodule "projects/meta-transaction/lib/openzeppelin-contracts"]
 	path = projects/meta-transaction/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/eip-4337/lib/forge-std"]
+	path = projects/eip-4337/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/eip-4337/lib/openzeppelin-contracts"]
+	path = projects/eip-4337/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

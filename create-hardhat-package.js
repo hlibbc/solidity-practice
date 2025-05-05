@@ -48,15 +48,6 @@ fs.writeFileSync(
   path.join(projectPath, "package.json"),
   JSON.stringify(packageJson, null, 2)
 );
-// .gitignore 추가/수정
-console.log("📦 .gitignore 생성 중...");
-const gitignorePath = path.join(projectPath, ".gitignore");
-const gitignoreContent = `node_modules
-foundry/out
-foundry/cache
-.env
-`;
-fs.writeFileSync(gitignorePath, gitignoreContent);
 
 // contracts/Example.sol 생성
 console.log("📦 contracts/Example.sol 생성 중...");

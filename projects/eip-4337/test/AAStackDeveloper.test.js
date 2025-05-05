@@ -87,7 +87,7 @@ describe("AAStack Deployer Test", function () {
       } catch (err) {
         console.log("Error parsing log:", err);
       }
-    }
+    } 
   
     // Check if the wallet is already deployed in EntryPoint, before sending user operation
     const currentNonce = await entryPoint.getNonce(walletAddress, userKey);

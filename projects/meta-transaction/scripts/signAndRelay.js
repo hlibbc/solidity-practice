@@ -8,7 +8,7 @@ async function main() {
     const forwarderAddress = process.env.FORWARDER_ADDRESS;
     const receiverAddress = process.env.RECEIVER_ADDRESS;
 
-    const Forwarder = await ethers.getContractFactory("MyForwarder");
+    const Forwarder = await ethers.getContractFactory("MyDefaultForwarder");
     const Receiver = await ethers.getContractFactory("MetaTxReceiver");
 
     const forwarder = new ethers.Contract(forwarderAddress, Forwarder.interface, relayer);
@@ -26,7 +26,7 @@ async function main() {
 
     // Prepare typed data
     const domain = {
-        name: "MyForwarder",
+        name: "MyDefaultForwarder",
         version: "1",
         chainId,
         verifyingContract: forwarderAddress,

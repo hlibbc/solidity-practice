@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "forge-std/console.sol";
-import {MyForwarder} from "../../contracts/MyForwarder.sol";
+import {MyDefaultForwarder} from "../../contracts/MyForwarder.sol";
 import {MetaTxReceiver} from "../../contracts/MetaTxReceiver.sol";
 import { ERC2771Forwarder } from "@openzeppelin/contracts/metatx/ERC2771Forwarder.sol";
 
@@ -40,7 +40,7 @@ contract MyForwarderTest is Test {
         (user, userKey) = makeAddrAndKey("User");
         relayer = makeAddr("Relayer");
 
-        forwarder = new MyForwarder();
+        forwarder = new MyDefaultForwarder();
         receiver = new MetaTxReceiver(address(forwarder));
     }
 
@@ -48,7 +48,7 @@ contract MyForwarderTest is Test {
         return keccak256(
             abi.encode(
                 keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256(bytes("MyForwarder")),
+                keccak256(bytes("MyDefaultForwarder")),
                 keccak256(bytes("1")),
                 block.chainid,
                 address(forwarder)

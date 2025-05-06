@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("MyForwarder", function () {
+describe("MyDefaultForwarder", function () {
     let forwarder;
     let receiver;
     let relayer;
@@ -11,7 +11,7 @@ describe("MyForwarder", function () {
     beforeEach(async function () {
         [user, relayer, signer] = await ethers.getSigners();
 
-        const Forwarder = await ethers.getContractFactory("MyForwarder");
+        const Forwarder = await ethers.getContractFactory("MyDefaultForwarder");
         const Receiver = await ethers.getContractFactory("MetaTxReceiver");
 
         forwarder = await Forwarder.deploy();
@@ -22,7 +22,7 @@ describe("MyForwarder", function () {
 
     function getDomain(forwarder, chainId) {
         return {
-            name: "MyForwarder",
+            name: "MyDefaultForwarder",
             version: "1",
             chainId,
             verifyingContract: forwarder,

@@ -3,7 +3,7 @@ const { ethers } = require("hardhat");
 async function deployContracts() {
     const [deployer] = await ethers.getSigners();
 
-    const Forwarder = await ethers.getContractFactory("MyForwarder");
+    const Forwarder = await ethers.getContractFactory("MyDefaultForwarder");
     const forwarder = await Forwarder.deploy();
     console.log("Forwarder tx hash:", forwarder.deploymentTransaction().hash);
     await forwarder.waitForDeployment();

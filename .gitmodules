@@ -1,0 +1,33 @@
+[submodule "projects/proj04/lib/forge-std"]
+	path = projects/proj04/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/eip-1271/lib/forge-std"]
+	path = projects/eip-1271/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/eip-1271/lib/openzeppelin-contracts"]
+	path = projects/eip-1271/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/eip-2612/lib/forge-std"]
+	path = projects/eip-2612/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/eip-2612/lib/openzeppelin-contracts"]
+	path = projects/eip-2612/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/nested-struct-sig/lib/forge-std"]
+	path = projects/nested-struct-sig/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/nested-struct-sig/lib/openzeppelin-contracts"]
+	path = projects/nested-struct-sig/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/meta-transaction/lib/forge-std"]
+	path = projects/meta-transaction/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/meta-transaction/lib/openzeppelin-contracts"]
+	path = projects/meta-transaction/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/eip-4337/lib/forge-std"]
+	path = projects/eip-4337/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/eip-4337/lib/openzeppelin-contracts"]
+	path = projects/eip-4337/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

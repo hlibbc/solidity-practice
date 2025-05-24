@@ -1,0 +1,18 @@
+# Ignore node_module & .env for mono-repo root
+node_modules/
+.env
+
+# Ignore all node_modules across projects
+**/node_modules/
+
+# Ignore all .env across projects
+**/.env
+
+# Ignore all hardhat build outputs across projects
+**/artifacts/
+**/cache/
+
+# Ignore all foundry build outputs across projects
+**/foundry/out/
+**/foundry/cache/
+**/lib/

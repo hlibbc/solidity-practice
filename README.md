@@ -8,10 +8,10 @@ pnpm 기반 모노레포 형식으로 구현되어 있으며, 서브 프로젝�
 
 | 프로젝트                            | 설명                                                         |
 | ----------------------------------- | ------------------------------------------------------------ |
-| [eip-1271](./projects/eip-1271)     | 스마트 컨트랙트 기반 서명 검증 표준 ([ERC-1271](https://eips.ethereum.org/EIPS/eip-1271)) 실습 |
-| [eip-2612](./projects/eip-2612)     | [ERC-2612](https://eips.ethereum.org/EIPS/eip-2612) Permit 방식의 서명 기반 토큰 승인 실습              |
-| [eip-712](./projects/eip-712)       | [ERC-712](https://eips.ethereum.org/EIPS/eip-712) 구조화된 데이터 서명 실습                             |
-| [eip-4337](./projects/eip-4337)     | [ERC-4337](https://eips.ethereum.org/EIPS/eip-4337) Account Abstraction 및 EntryPoint 기반 지갑 실습     |
+| [eip-1271](./projects/eip-1271)     | [EIP-1271](https://eips.ethereum.org/EIPS/eip-1271) 기반 스마트컨트랙트 Wallet 표준 실습 |
+| [eip-2612](./projects/eip-2612)     | Permit ([EIP-2612](https://eips.ethereum.org/EIPS/eip-2612) ) 방식의 서명 기반 토큰 승인 실습              |
+| [nested-struct-sig](./projects/nested-struct-sig)       | [EIP-712](https://eips.ethereum.org/EIPS/eip-712) 기반 Custom structure 데이터 서명 실습                             |
+| [eip-4337](./projects/eip-4337)     | [EIP-4337](https://eips.ethereum.org/EIPS/eip-4337) Account Abstraction 및 EntryPoint 기반 지갑 실습     |
 
 ---
 
@@ -41,7 +41,7 @@ pnpm install
 # 모노레포 루트에서 특정 하위 프로젝트의 solidity 코드 컴파일
 pnpm --filter <프로젝트 명> run compile
 
-# 특정 하위 프로젝트로 진입하여 의존성 설치
+# 특정 하위 프로젝트로 진입하여 solidity 코드 컴파일
 cd <프로젝트 폴더명>
 pnpm run compile
 ```
@@ -53,7 +53,7 @@ pnpm run compile
 # 모노레포 루트에서 특정 하위 프로젝트 테스트
 pnpm --filter <프로젝트 명> run test
 
-# 특정 하위 프로젝트로 진입하여 의존성 설치
+# 특정 하위 프로젝트로 진입하여 테스트
 cd <프로젝트 폴더명>
 pnpm run test
 ```

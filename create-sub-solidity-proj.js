@@ -1,5 +1,9 @@
-// create-hardhat-foundry-package.js
-
+/**
+ * @file create-sub-solidity-proj.js
+ * @fileoverview Create a sub solidity project.
+ * @author hlibbc
+ * @created 2025-03-28
+ */
 const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
@@ -7,7 +11,7 @@ const { execSync } = require("child_process");
 const projectName = process.argv[2];
 
 if (!projectName) {
-  console.error("❌ 프로젝트 이름을 인자로 넘겨주세요. 예: node create-hardhat-foundry-package.js proj04");
+  console.error("❌ 프로젝트 이름을 인자로 넘겨주세요. 예: node create-monorepo-solidity-proj.js proj04");
   process.exit(1);
 }
 

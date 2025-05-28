@@ -41,7 +41,7 @@ projects/eip-1271/
 # 모노레포 루트에서 설치
 pnpm --filter eip-1271 install
 
-# 특정 하위 프로젝트로 진입하여 설치
+# eip-1271 프로젝트로 진입하여 설치
 cd projects/eip-1271
 pnpm install
 ```

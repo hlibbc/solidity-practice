@@ -37,3 +37,10 @@
 [submodule "projects/storage-layout/lib/openzeppelin-contracts"]
 	path = projects/storage-layout/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/stateful-libraries/lib/forge-std"]
+	path = projects/stateful-libraries/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/stateful-libraries/lib/openzeppelin-contracts"]
+	path = projects/stateful-libraries/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+	

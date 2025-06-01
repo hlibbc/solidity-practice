@@ -133,4 +133,17 @@ execSync("forge install OpenZeppelin/openzeppelin-contracts --no-commit", {
   cwd: projectPath,
   stdio: "inherit",
 });
+
+// Git 캐시에서 lib 제거 (추적 방지)
+console.log("🧹 Git에서 lib 디렉토리 추적 제거 중...");
+try {
+  execSync("git rm -r -f --cached lib/", {
+    cwd: projectPath,
+    stdio: "inherit"
+  });
+} catch (err) {
+  console.warn("⚠️  git rm 실패: 이미 추적되지 않거나 git repo가 아닐 수 있습니다.");
+}
+
+
 console.log(`✅ Hardhat + Foundry 프로젝트 생성 완료: projects/${projectName}`);

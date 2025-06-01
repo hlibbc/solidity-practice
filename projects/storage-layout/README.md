@@ -14,7 +14,7 @@ projects/storage-layout/
 │ └── StorageLayoutExplanation.debug.test.js # Hardhat 기반 JS 테스트
 ├── foundry/
 │ └── test/
-│     └── StorageLayoutExplanation.t.t.sol # Foundry 기반 Solidity 테스트
+│     └── StorageLayoutExplanation.t.sol # Foundry 기반 Solidity 테스트
 ├── foundry.toml # Foundry 설정 파일
 ├── hardhat.config.js # Hardhat 설정 파일
 ├── package.json

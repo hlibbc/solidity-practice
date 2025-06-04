@@ -44,3 +44,9 @@
 	path = projects/stateful-libraries/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
 	
+[submodule "projects/breaking-rng/lib/forge-std"]
+	path = projects/breaking-rng/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/breaking-rng/lib/openzeppelin-contracts"]
+	path = projects/breaking-rng/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

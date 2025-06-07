@@ -40,6 +40,7 @@ projects/breaking-rng/
 - hardhat (v2.22.0)
 - ethers.js (v6.13.5)
 - foundry (forge Version: 1.0.0-stable)
+- @openzeppelin/contracts (v5.2.0)
 
 ---
 

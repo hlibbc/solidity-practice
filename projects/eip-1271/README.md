@@ -33,6 +33,7 @@ projects/eip-1271/
 - ethers.js (v6.13.5)
 - @metamask/eth-sig-util (v8.2.0)
 - foundry (forge Version: 1.0.0-stable)
+- @openzeppelin/contracts (v5.2.0)
 
 ---
 

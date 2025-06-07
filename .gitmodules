@@ -50,3 +50,9 @@
 [submodule "projects/breaking-rng/lib/openzeppelin-contracts"]
 	path = projects/breaking-rng/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/chainlink-vrf/lib/forge-std"]
+	path = projects/chainlink-vrf/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/chainlink-vrf/lib/openzeppelin-contracts"]
+	path = projects/chainlink-vrf/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

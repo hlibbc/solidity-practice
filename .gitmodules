@@ -62,3 +62,9 @@
 [submodule "projects/diamonds/lib/openzeppelin-contracts"]
 	path = projects/diamonds/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/bypassing-extcodesize/lib/forge-std"]
+	path = projects/bypassing-extcodesize/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/bypassing-extcodesize/lib/openzeppelin-contracts"]
+	path = projects/bypassing-extcodesize/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

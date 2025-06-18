@@ -124,12 +124,14 @@ console.log("📦 의존성 설치 중...");
 execSync("pnpm install", { cwd: projectPath, stdio: "inherit" });
 
 console.log("📦 Foundry 유틸 설치 중 (forge-std)...");
-execSync("forge install foundry-rs/forge-std --no-commit", {
+// execSync("forge install foundry-rs/forge-std --no-commit", {
+execSync("forge install foundry-rs/forge-std", { // foundry 최신버전 (v.1.2.3) 부터는 no-commit 할 필요 없음
   cwd: projectPath,
   stdio: "inherit",
 });
 console.log("📦 Foundry 유틸 설치 중 (openzeppelin)...");
-execSync("forge install OpenZeppelin/openzeppelin-contracts --no-commit", {
+// execSync("forge install OpenZeppelin/openzeppelin-contracts --no-commit", {
+execSync("forge install OpenZeppelin/openzeppelin-contracts", { // foundry 최신버전 (v.1.2.3) 부터는 no-commit 할 필요 없음
   cwd: projectPath,
   stdio: "inherit",
 });

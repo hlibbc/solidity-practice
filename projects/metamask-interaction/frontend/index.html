@@ -3,64 +3,6 @@
 <head>
   <meta charset="UTF-8" />
   <title>MetaMask 연동 + 토큰 전송 테스트</title>
-  <script type="module">
-    import { BrowserProvider, Contract, parseUnits } from "https://cdn.jsdelivr.net/npm/ethers@6.10.0/+esm";
-
-    // 👉 실제 배포된 ERC20 주소로 바꾸세요
-    const tokenAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // or replace at runtime
-
-    const erc20Abi = [
-      "function transfer(address to, uint amount) public returns (bool)",
-      "function approve(address spender, uint amount) public returns (bool)",
-      "function transferFrom(address from, address to, uint amount) public returns (bool)"
-    ];
-
-    let provider, signer, tokenContract;
-
-    document.getElementById("connectBtn").onclick = async () => {
-      if (!window.ethereum) {
-        alert("MetaMask가 설치되어 있지 않습니다.");
-        return;
-      }
-
-      provider = new BrowserProvider(window.ethereum);
-      await provider.send("eth_requestAccounts", []);
-      signer = await provider.getSigner();
-
-      const address = await signer.getAddress();
-      document.getElementById("accountDisplay").innerText = `지갑 연결됨: ${address}`;
-
-      tokenContract = new Contract(tokenAddress, erc20Abi, signer);
-    };
-
-    document.getElementById("transferBtn").onclick = async () => {
-      const to = document.getElementById("transferTo").value;
-      const amount = parseUnits(document.getElementById("transferAmount").value);
-
-      try {
-        const tx = await tokenContract.transfer(to, amount);
-        document.getElementById("txResult").innerText = `transfer TX: ${tx.hash}`;
-      } catch (err) {
-        console.error(err);
-        document.getElementById("txResult").innerText = "전송 실패";
-      }
-    };
-
-    document.getElementById("approveAndSendBtn").onclick = async () => {
-      const to = document.getElementById("approveTo").value;
-      const amount = parseUnits(document.getElementById("approveAmount").value);
-
-      try {
-        const from = await signer.getAddress();
-        await tokenContract.approve(from, amount);
-        const tx = await tokenContract.transferFrom(from, to, amount);
-        document.getElementById("txResult").innerText = `approve + transferFrom TX: ${tx.hash}`;
-      } catch (err) {
-        console.error(err);
-        document.getElementById("txResult").innerText = "승인+전송 실패";
-      }
-    };
-  </script>
 </head>
 <body>
   <h2>🦊 MetaMask 연동 테스트</h2>
@@ -80,5 +22,47 @@
   <button id="approveAndSendBtn">승인 + 전송</button>
 
   <p id="txResult"></p>
+
+  <script type="module">
+    import {
+      connectWallet,
+      transferLib,
+      approveAndTransferLib
+    } from "./libs/MyToken.js";
+
+    document.getElementById("connectBtn").onclick = async () => {
+      try {
+        const addr = await connectWallet();
+        document.getElementById("accountDisplay").innerText = `지갑 연결됨: ${addr}`;
+      } catch (err) {
+        console.error(err);
+        document.getElementById("accountDisplay").innerText = "지갑 연결 실패";
+      }
+    };
+
+    document.getElementById("transferBtn").onclick = async () => {
+      const to = document.getElementById("transferTo").value;
+      const amount = document.getElementById("transferAmount").value;
+      try {
+        const hash = await transferLib(to, amount);
+        document.getElementById("txResult").innerText = `transfer TX: ${hash}`;
+      } catch (err) {
+        console.error(err);
+        document.getElementById("txResult").innerText = "전송 실패";
+      }
+    };
+
+    document.getElementById("approveAndSendBtn").onclick = async () => {
+      const to = document.getElementById("approveTo").value;
+      const amount = document.getElementById("approveAmount").value;
+      try {
+        const hash = await approveAndTransferLib(to, amount);
+        document.getElementById("txResult").innerText = `approve + transferFrom TX: ${hash}`;
+      } catch (err) {
+        console.error(err);
+        document.getElementById("txResult").innerText = "승인+전송 실패";
+      }
+    };
+  </script>
 </body>
 </html>

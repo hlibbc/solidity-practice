@@ -1,0 +1,30 @@
+{
+  "name": "metamask-interaction",
+  "version": "1.0.0",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy": "hardhat run scripts/deploy.js",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^3.0.0",
+    "@openzeppelin/contracts": "^5.2.0",
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@vitejs/plugin-react": "^4.2.1",
+    "dotenv": "^16.0.0",
+    "hardhat": "^2.22.0",
+    "vite": "^5.0.8"
+  },
+  "dependencies": {
+    "ethers": "6.13.5",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "wagmi": "^2.5.7",
+    "viem": "^2.7.9",
+    "@tanstack/react-query": "^5.17.9"
+  }
+}

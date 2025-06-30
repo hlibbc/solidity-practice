@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>MetaMask 연동 + 토큰 전송 테스트</title>
+</head>
+<body>
+  <h2>🦊 MetaMask 연동 테스트</h2>
+  <button id="connectBtn">🔌 지갑 연결</button>
+  <p id="accountDisplay"></p>
+
+  <hr />
+
+  <h3>🚀 transfer</h3>
+  <input type="text" id="transferTo" placeholder="받는 주소" />
+  <input type="number" id="transferAmount" placeholder="수량" />
+  <button id="transferBtn">전송</button>
+
+  <h3>🛂 approve + transferFrom</h3>
+  <input type="text" id="approveTo" placeholder="보낼 주소" />
+  <input type="number" id="approveAmount" placeholder="수량" />
+  <button id="approveAndSendBtn">승인 + 전송</button>
+
+  <p id="txResult"></p>
+
+  <script type="module">
+    import {
+      connectWallet,
+      transferLib,
+      approveAndTransferLib
+    } from "./libs/MyToken.js";
+
+    document.getElementById("connectBtn").onclick = async () => {
+      try {
+        const addr = await connectWallet();
+        document.getElementById("accountDisplay").innerText = `지갑 연결됨: ${addr}`;
+      } catch (err) {
+        console.error(err);
+        document.getElementById("accountDisplay").innerText = "지갑 연결 실패";
+      }
+    };
+
+    document.getElementById("transferBtn").onclick = async () => {
+      const to = document.getElementById("transferTo").value;
+      const amount = document.getElementById("transferAmount").value;
+      try {
+        const hash = await transferLib(to, amount);
+        document.getElementById("txResult").innerText = `transfer TX: ${hash}`;
+      } catch (err) {
+        console.error(err);
+        document.getElementById("txResult").innerText = "전송 실패";
+      }
+    };
+
+    document.getElementById("approveAndSendBtn").onclick = async () => {
+      const to = document.getElementById("approveTo").value;
+      const amount = document.getElementById("approveAmount").value;
+      try {
+        const hash = await approveAndTransferLib(to, amount);
+        document.getElementById("txResult").innerText = `approve + transferFrom TX: ${hash}`;
+      } catch (err) {
+        console.error(err);
+        document.getElementById("txResult").innerText = "승인+전송 실패";
+      }
+    };
+  </script>
+</body>
+</html>

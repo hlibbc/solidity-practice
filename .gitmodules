@@ -80,3 +80,9 @@
 [submodule "projects/metamask-interaction/lib/openzeppelin-contracts"]
 	path = projects/metamask-interaction/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/custom-rng/lib/forge-std"]
+	path = projects/custom-rng/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/custom-rng/lib/openzeppelin-contracts"]
+	path = projects/custom-rng/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

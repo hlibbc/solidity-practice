@@ -86,3 +86,9 @@
 [submodule "projects/custom-rng/lib/openzeppelin-contracts"]
 	path = projects/custom-rng/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/changing-bytecode/lib/forge-std"]
+	path = projects/changing-bytecode/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/changing-bytecode/lib/openzeppelin-contracts"]
+	path = projects/changing-bytecode/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

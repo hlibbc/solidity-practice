@@ -295,6 +295,21 @@ importers:
         specifier: ^2.22.0
         version: 2.22.19(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@22.13.11)(typescript@5.8.2))(typescript@5.8.2)(utf-8-validate@5.0.10)
 
+  projects/zk-vote:
+    devDependencies:
+      '@nomicfoundation/hardhat-toolbox':
+        specifier: ^6.0.0
+        version: 6.1.0(354a777496916f3ba7db310b828599d6)
+      '@openzeppelin/contracts':
+        specifier: ^5.3.0
+        version: 5.3.0
+      dotenv:
+        specifier: ^17.2.0
+        version: 17.2.0
+      hardhat:
+        specifier: ^2.25.0
+        version: 2.26.0(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@22.13.11)(typescript@5.8.2))(typescript@5.8.2)(utf-8-validate@5.0.10)
+
 packages:
 
   '@account-abstraction/contracts@0.8.0':

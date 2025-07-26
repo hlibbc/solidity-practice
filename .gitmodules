@@ -98,3 +98,9 @@
 [submodule "projects/zk-vote/lib/openzeppelin-contracts"]
 	path = projects/zk-vote/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/remove-duplicates/lib/forge-std"]
+	path = projects/remove-duplicates/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/remove-duplicates/lib/openzeppelin-contracts"]
+	path = projects/remove-duplicates/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

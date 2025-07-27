@@ -294,11 +294,11 @@ console.log("인증 투자자:", investor.isAccredited);
 ## 📞 지원
 
 ### **문서**
-- [T-REX 공식 문서](https://docs.trex.org)
+- [T-REX 백서](https://tokeny.com/wp-content/uploads/2020/05/Whitepaper-T-REX-Security-Tokens-V3.pdf)
 - [ONCHAINID 문서](https://docs.onchainid.com)
 
 ### **커뮤니티**
-- [T-REX GitHub](https://github.com/tokeny/T-REX)
+- [T-REX GitHub](https://github.com/TokenySolutions/T-REX)
 - [ONCHAINID GitHub](https://github.com/onchain-id)
 
 ---

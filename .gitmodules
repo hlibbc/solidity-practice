@@ -104,3 +104,12 @@
 [submodule "projects/remove-duplicates/lib/openzeppelin-contracts"]
 	path = projects/remove-duplicates/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/simple-sto/lib/forge-std"]
+	path = projects/simple-sto/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/simple-sto/lib/openzeppelin-contracts"]
+	path = projects/simple-sto/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/simple-sto/lib/solidity"]
+	path = projects/simple-sto/lib/solidity
+	url = https://github.com/onchain-id/solidity

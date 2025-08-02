@@ -1,6 +1,15 @@
+/**
+ * @file deploy.js
+ * @notice MyToken 컨트랙트 배포 스크립트
+ * @author hlibbc
+ */
 const hre = require("hardhat");
 const { ethers } = hre;
 
+/**
+ * @notice MyToken 컨트랙트를 배포한다.
+ * @dev ethers v6 버전 사용
+ */
 async function main() {
     const MyToken = await ethers.getContractFactory("MyToken");
     const myToken = await MyToken.deploy(); 

@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @title StorageLayoutExplanation contract
+ * @notice Solidity 스토리지 레이아웃을 설명하는 교육용 컨트랙트
+ * @dev 다양한 데이터 타입들이 스토리지 슬롯에 어떻게 저장되는지 시연
+ *      - 정적 타입 (bool, uint8, uint32, uint256, bytes32)
+ *      - 동적 타입 (bytes, string) - 31바이트 이하/초과 구분
+ *      - 배열과 매핑의 스토리지 위치 계산
+ * @author hlibbc
+ */
 contract StorageLayoutExplanation {
     // Slot 1: Static value types (packed into one slot)
     bool    public aBool;   // 1 byte
@@ -27,10 +36,14 @@ contract StorageLayoutExplanation {
     // Slot 9: Mappings (2 dimension)
     mapping(uint256 => mapping(uint256 => uint256)) public aDoubleMap;
 
-    /// @notice Constructor
-    /// @dev Initialize variables (to ensure that variables at that location are properly contained when reading slot-wise values)
-    ///
-    /// slot 단위 값 읽을 때 해당 위치의 변수들이 정상적으로 들어있는지 확인을 위해 변수 초기화 수행 
+    /**
+     * @notice StorageLayoutExplanation 컨트랙트 생성자
+     * @dev 각 스토리지 슬롯에 다양한 타입의 데이터를 초기화
+     *      - 정적 타입들: bool, uint8, uint32, uint256, bytes32
+     *      - 동적 타입들: bytes, string (31바이트 이하/초과)
+     *      - 배열과 매핑 데이터 초기화
+     *      - slot 단위 값 읽을 때 해당 위치의 변수들이 정상적으로 들어있는지 확인을 위해 변수 초기화 수행
+     */
     constructor() {
         // initialize static
         aBool    = true;
@@ -53,67 +66,76 @@ contract StorageLayoutExplanation {
         aDoubleMap[2][3] = 2002;
     }
 
-    /// @notice Reads the value contained in Slot.
-    /// @param slot Slot Index (uint256)
-    /// @return value The value contained in the slot (32 bytes)
-    ///
-    /// slot index(slot)에 들어있는 데이터 반환 (32bytes)
+    /**
+     * @notice 지정된 슬롯에 저장된 값을 읽어온다
+     * @param slot 읽을 슬롯 인덱스 (uint256)
+     * @return value 슬롯에 저장된 값 (32 bytes)
+     * @dev assembly를 사용하여 직접 스토리지에서 값을 읽어옴
+     *      slot index(slot)에 들어있는 데이터 반환 (32bytes)
+     */
     function readSlot(uint256 slot) external view returns (bytes32 value) {
         assembly {
             value := sload(slot)
         }
     }
 
-    /// @notice Find the slot index where the beginning of the bytesLong data (>= 32 bytes) is stored.
-    /// @return _ the slot index where the beginning of the bytesLong data (>= 32 bytes) is stored
-    /// @dev The hash value resulting from the keccak256 operation on the declared variable slot index becomes slot index
-    ///
-    /// keccak256(abi.encode(uint256("슬롯번호")));
+    /**
+     * @notice bytesLong 데이터(>= 32 bytes)가 저장된 시작 슬롯 인덱스를 찾는다
+     * @return _ bytesLong 데이터가 저장된 시작 슬롯 인덱스
+     * @dev 선언된 변수의 슬롯 인덱스에 대한 keccak256 연산 결과가 슬롯 인덱스가 됨
+     *      keccak256(abi.encode(uint256("슬롯번호")));
+     */
     function getSlotIndexBytesLongData() external pure returns (bytes32) {
         return keccak256(abi.encode(uint256(5)));
     }
 
-    /// @notice Find the slot index where the beginning of the stringLong data (>= 32 bytes) is stored.
-    /// @return _ the slot index where the beginning of the stringLong data (>= 32 bytes) is stored
-    /// @dev The hash value resulting from the keccak256 operation on the declared variable slot index becomes slot index
-    ///
-    /// keccak256(abi.encode(uint256("슬롯번호")));
+    /**
+     * @notice stringLong 데이터(>= 32 bytes)가 저장된 시작 슬롯 인덱스를 찾는다
+     * @return _ stringLong 데이터가 저장된 시작 슬롯 인덱스
+     * @dev 선언된 변수의 슬롯 인덱스에 대한 keccak256 연산 결과가 슬롯 인덱스가 됨
+     *      keccak256(abi.encode(uint256("슬롯번호")));
+     */
     function getSlotIndexStringLongData() external pure returns (bytes32) {
         return keccak256(abi.encode(uint256(6)));
     }
 
-    /// @notice Find the slot index where the value of the element corresponding to “arrayIndex” in the array is stored.
-    /// @return _ the slot index where the value of the element corresponding to “arrayIndex” in the array is stored
-    /// @dev The hash value of the keccak256 operation applied to the slot index of the declared array variable becomes the slot index 
-    /// where the 0th element of the array is stored, and the slot index is incremented sequentially as the index of the array increases.
-    ///
-    /// bytes32(uint256(keccak256(abi.encode(uint256("슬롯번호")))) + arrayIndex)
+    /**
+     * @notice 배열에서 "arrayIndex"에 해당하는 요소의 값이 저장된 슬롯 인덱스를 찾는다
+     * @param arrayIndex 배열의 인덱스
+     * @return _ 배열 요소가 저장된 슬롯 인덱스
+     * @dev 선언된 배열 변수의 슬롯 인덱스에 적용된 keccak256 연산의 해시값이 배열의 0번째 요소가 저장된 슬롯 인덱스가 되고,
+     *      배열의 인덱스가 증가함에 따라 슬롯 인덱스가 순차적으로 증가함
+     *      bytes32(uint256(keccak256(abi.encode(uint256("슬롯번호")))) + arrayIndex)
+     */
     function getSlotIndexArrayData(uint256 arrayIndex) external pure returns (bytes32) {
         return bytes32(uint256(keccak256(abi.encode(uint256(7)))) + arrayIndex);
     }
 
-    /// @notice Find the slot index where the data corresponding to “key” in the mapping variable is stored.
-    /// @return _ the slot index where the data corresponding to “key” is stored
-    /// @dev The hash value obtained by performing the keccak256 operation on the result obtained by passing the “key” and “slot index” as arguments 
-    /// using the abi.encode function is the slot index where the data is stored.
-    ///
-    /// keccak256(abi.encode(key, uint256("슬롯번호")))
-    /// "key"와 "슬롯번호"를 abi.encode한 값을 keccak256한 hash값 -> "key"에 대응되는 데이터가 저장된 슬롯 인덱스
+    /**
+     * @notice 매핑 변수에서 "key"에 해당하는 데이터가 저장된 슬롯 인덱스를 찾는다
+     * @param key 매핑의 키 값
+     * @return _ "key"에 해당하는 데이터가 저장된 슬롯 인덱스
+     * @dev "key"와 "슬롯 인덱스"를 abi.encode 함수의 인수로 전달하여 얻은 결과에 
+     *      keccak256 연산을 수행한 해시값이 데이터가 저장된 슬롯 인덱스가 됨
+     *      keccak256(abi.encode(key, uint256("슬롯번호")))
+     *      "key"와 "슬롯번호"를 abi.encode한 값을 keccak256한 hash값 -> "key"에 대응되는 데이터가 저장된 슬롯 인덱스
+     */
     function getSlotIndexMappingData(uint256 key) external pure returns (bytes32) {
         return keccak256(abi.encode(key, uint256(8)));
     }
 
-    /// @notice Find the slot index where the data corresponding to ‘key1’ and ‘key2’ of the double mapping variable is stored.
-    /// @return _ the slot index where the data corresponding to ‘key1’ and ‘key2’ of the double mapping variable is stored
-    /// @dev The hash value obtained by performing the keccak256 operation on the result obtained by passing “key1” and “slot index” as arguments 
-    /// to the abi.encode function becomes the new “slot index.”
-    /// Using the abi.encode function, pass “key2” and the “slot index” obtained above as arguments, perform the keccak256 operation on the result, 
-    /// and the hash value obtained is the slot index where the data corresponding to the ‘key1’ and “key2” of the double mapping variable is stored.
-
-    ///
-    /// keccak256(abi.encode(key, uint256("슬롯번호")))
-    /// "key1"와 "슬롯번호"를 abi.encode한 값을 keccak256한 hash값 -> 새로운 슬롯번호
-    /// "key2"와 위에서 구한 새로운 슬롯번호를 abi.encode한 값을 keccak256한 hash값 -> "key1"과 "key2"에 대응되는 데이터가 저장된 슬롯 인덱스
+    /**
+     * @notice 이중 매핑 변수에서 'key1'과 'key2'에 해당하는 데이터가 저장된 슬롯 인덱스를 찾는다
+     * @param key1 첫 번째 매핑의 키 값
+     * @param key2 두 번째 매핑의 키 값
+     * @return _ 이중 매핑 변수에서 'key1'과 'key2'에 해당하는 데이터가 저장된 슬롯 인덱스
+     * @dev "key1"과 "슬롯 인덱스"를 abi.encode 함수의 인수로 전달하여 얻은 결과에 keccak256 연산을 수행한 해시값이 
+     *      새로운 "슬롯 인덱스"가 됨. abi.encode 함수를 사용하여 "key2"와 위에서 구한 "슬롯 인덱스"를 인수로 전달하고,
+     *      결과에 keccak256 연산을 수행한 해시값이 이중 매핑 변수의 'key1'과 "key2"에 해당하는 데이터가 저장된 슬롯 인덱스가 됨
+     *      keccak256(abi.encode(key, uint256("슬롯번호")))
+     *      "key1"와 "슬롯번호"를 abi.encode한 값을 keccak256한 hash값 -> 새로운 슬롯번호
+     *      "key2"와 위에서 구한 새로운 슬롯번호를 abi.encode한 값을 keccak256한 hash값 -> "key1"과 "key2"에 대응되는 데이터가 저장된 슬롯 인덱스
+     */
     function getSlotIndexDoubleMappingData(
         uint256 key1, 
         uint256 key2

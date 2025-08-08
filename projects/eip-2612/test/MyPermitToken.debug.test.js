@@ -8,8 +8,7 @@ describe("MyPermitToken - EIP-2612 Debugging (Ethers v6)", function () {
   const name = "MyPermitToken";
   const version = "1";
   const value = ethers.parseUnits("10", 18);
-  const chainId = 31337; // Default chain ID for Hardhat local
-
+  
   beforeEach(async function () {
     [owner, spender, others] = await ethers.getSigners();
 
@@ -21,6 +20,10 @@ describe("MyPermitToken - EIP-2612 Debugging (Ethers v6)", function () {
   it("should match on-chain and off-chain digest and recover same signer", async function () {
     const deadline = Math.floor(Date.now() / 1000) + 3600;
     const nonce = await token.nonces(owner.address);
+
+    // 실제 네트워크의 체인 ID 가져오기
+    const network = await ethers.provider.getNetwork();
+    const chainId = network.chainId;
 
     const domain = {
       name: name,
@@ -46,6 +49,44 @@ describe("MyPermitToken - EIP-2612 Debugging (Ethers v6)", function () {
       nonce: nonce,
       deadline: deadline,
     };
+
+    ////  jhhong
+    // ===== 배포된 컨트랙트 정보 출력 =====
+    console.log("\n📋 배포된 컨트랙트 정보:");
+    console.log("   컨트랙트 주소:", await token.getAddress());
+    console.log("   컨트랙트 이름:", await token.name());
+    console.log("   컨트랙트 심볼:", await token.symbol());
+    console.log("   버전:", version);
+    console.log("   실제 체인 ID:", chainId);
+    console.log("   네트워크 이름:", network.name);
+    
+    // DOMAIN_SEPARATOR 값 출력
+    console.log("\n🔐 DOMAIN_SEPARATOR:");
+    const domainSeparator = await token.DOMAIN_SEPARATOR();
+    console.log("   값:", domainSeparator);
+    console.log("   길이:", domainSeparator.length, "문자");
+    
+    // 올바른 방법: ethers.TypedDataEncoder 사용
+    const domainForEncoder = {
+        name: name,
+        version: version,
+        chainId: Number(chainId),
+        verifyingContract: await token.getAddress()
+    };
+    
+    const calculatedDomainSeparator = ethers.TypedDataEncoder.hashDomain(domainForEncoder);
+    console.log("\n🔍 검증:");
+    console.log("   계산된 값:", calculatedDomainSeparator);
+    console.log("   일치 여부:", domainSeparator === calculatedDomainSeparator ? "✅ 일치" : "❌ 불일치");
+    
+    // 디버깅을 위한 추가 정보
+    console.log("\n🔍 디버깅 정보:");
+    console.log("   Domain 구조:");
+    console.log("     - name:", name);
+    console.log("     - version:", version);
+    console.log("     - chainId:", Number(chainId));
+    console.log("     - verifyingContract:", await token.getAddress());
+    console.log("=====================================\n");
 
     // 🖊️ EIP-712 signature 생성 (Ethers v6)
     const signature = await owner.signTypedData(domain, types, message);
@@ -78,6 +119,10 @@ describe("MyPermitToken - EIP-2612 Debugging (Ethers v6)", function () {
   it("should revert if signature is not from owner", async function () {
     const deadline = Math.floor(Date.now() / 1000) + 3600;
     const nonce = await token.nonces(owner.address);
+  
+    // 실제 네트워크의 체인 ID 가져오기
+    const network = await ethers.provider.getNetwork();
+    const chainId = network.chainId;
   
     const domain = {
       name,
@@ -122,6 +167,10 @@ describe("MyPermitToken - EIP-2612 Debugging (Ethers v6)", function () {
   it("should revert if signature is from a third party (not owner, not spender)", async function () {
     const deadline = Math.floor(Date.now() / 1000) + 3600;
     const nonce = await token.nonces(owner.address);
+  
+    // 실제 네트워크의 체인 ID 가져오기
+    const network = await ethers.provider.getNetwork();
+    const chainId = network.chainId;
   
     const domain = {
       name,

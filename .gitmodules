@@ -113,3 +113,9 @@
 [submodule "projects/simple-sto/lib/solidity"]
 	path = projects/simple-sto/lib/solidity
 	url = https://github.com/onchain-id/solidity
+[submodule "projects/token-vesting/lib/forge-std"]
+	path = projects/token-vesting/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/token-vesting/lib/openzeppelin-contracts"]
+	path = projects/token-vesting/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

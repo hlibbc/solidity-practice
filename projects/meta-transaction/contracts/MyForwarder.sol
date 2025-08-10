@@ -30,6 +30,7 @@ contract MyDefaultForwarder is ERC2771Forwarder {
     function execute(ForwardRequestData calldata request)
         public
         payable
+        virtual
         override
     {
         // 원본과 동일한 값 일치 검증
@@ -108,7 +109,127 @@ contract MyDefaultForwarder is ERC2771Forwarder {
  * 화이트리스트 관리는 소유자가 수행합니다.
  */
 contract MyWhitelistForwarder is MyDefaultForwarder {
-
+    // === 상태 변수 ===
+    mapping(address => bool) public whitelist;
+    address public owner;
+    
+    // === 이벤트 ===
+    event WhitelistAdded(address indexed target, address indexed addedBy);
+    event WhitelistRemoved(address indexed target, address indexed removedBy);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    
+    // === 에러 ===
+    error NotWhitelisted(address target);
+    error NotOwner();
+    error InvalidAddress();
+    
+    // === 생성자 ===
+    constructor() {
+        owner = msg.sender;
+    }
+    
+    // === 수정자 ===
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert NotOwner();
+        _;
+    }
+    
+    // === whitelist 관리 함수 ===
+    
+    /**
+     * @notice 주소를 whitelist에 추가
+     * @param target 추가할 주소
+     */
+    function addToWhitelist(address target) external onlyOwner {
+        if (target == address(0)) revert InvalidAddress();
+        whitelist[target] = true;
+        emit WhitelistAdded(target, msg.sender);
+    }
+    
+    /**
+     * @notice 주소를 whitelist에서 제거
+     * @param target 제거할 주소
+     */
+    function removeFromWhitelist(address target) external onlyOwner {
+        if (target == address(0)) revert InvalidAddress();
+        whitelist[target] = false;
+        emit WhitelistRemoved(target, msg.sender);
+    }
+    
+    /**
+     * @notice 여러 주소를 한 번에 whitelist에 추가
+     * @param targets 추가할 주소 배열
+     */
+    function addBatchToWhitelist(address[] calldata targets) external onlyOwner {
+        for (uint256 i = 0; i < targets.length; i++) {
+            if (targets[i] == address(0)) revert InvalidAddress();
+            whitelist[targets[i]] = true;
+            emit WhitelistAdded(targets[i], msg.sender);
+        }
+    }
+    
+    /**
+     * @notice 여러 주소를 한 번에 whitelist에서 제거
+     * @param targets 제거할 주소 배열
+     */
+    function removeBatchFromWhitelist(address[] calldata targets) external onlyOwner {
+        for (uint256 i = 0; i < targets.length; i++) {
+            if (targets[i] == address(0)) revert InvalidAddress();
+            whitelist[targets[i]] = false;
+            emit WhitelistRemoved(targets[i], msg.sender);
+        }
+    }
+    
+    /**
+     * @notice 주소가 whitelist에 등록되어 있는지 확인
+     * @param target 확인할 주소
+     * @return 등록 여부
+     */
+    function isWhitelisted(address target) external view returns (bool) {
+        return whitelist[target];
+    }
+    
+    // === 소유권 관리 ===
+    
+    /**
+     * @notice 새로운 소유자에게 권한 이전
+     * @param newOwner 새로운 소유자 주소
+     */
+    function transferOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert InvalidAddress();
+        address oldOwner = owner;
+        owner = newOwner;
+        emit OwnershipTransferred(oldOwner, newOwner);
+    }
+    
+    /**
+     * @notice 소유권 포기 (주의: 되돌릴 수 없음)
+     */
+    function renounceOwnership() external onlyOwner {
+        address oldOwner = owner;
+        owner = address(0);
+        emit OwnershipTransferred(oldOwner, address(0));
+    }
+    
+    // === execute 함수 오버라이드 ===
+    
+    /**
+     * @notice whitelist 검증을 추가한 execute 함수
+     * @param request ForwardRequestData 구조체
+     */
+    function execute(ForwardRequestData calldata request)
+        public
+        payable
+        override
+    {
+        // === whitelist 검증 추가 ===
+        if (!whitelist[request.to]) {
+            revert NotWhitelisted(request.to);
+        }
+        
+        // 부모 클래스의 execute 함수 호출 (revert reason bubbling 포함)
+        super.execute(request);
+    }
 }
 
 /**

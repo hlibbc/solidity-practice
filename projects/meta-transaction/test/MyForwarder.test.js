@@ -1,182 +1,228 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
+
 describe("MyDefaultForwarder", function () {
-    let forwarder;
-    let receiver;
-    let relayer;
-    let user;
-    let signer;
+  let forwarder, receiver, user, relayer;
+  let domain;
 
-    beforeEach(async function () {
-        [user, relayer, signer] = await ethers.getSigners();
+  beforeEach(async function () {
+    [user, relayer] = await ethers.getSigners();
 
-        const Forwarder = await ethers.getContractFactory("MyDefaultForwarder");
-        const Receiver = await ethers.getContractFactory("MetaTxReceiver");
+    const MyDefaultForwarder = await ethers.getContractFactory("MyDefaultForwarder");
+    forwarder = await MyDefaultForwarder.deploy();
 
-        forwarder = await Forwarder.deploy();
-        await forwarder.waitForDeployment();
-        receiver = await Receiver.deploy(await forwarder.getAddress());
-        await receiver.waitForDeployment();
-    });
+    const MetaTxReceiver = await ethers.getContractFactory("MetaTxReceiver");
+    receiver = await MetaTxReceiver.deploy(await forwarder.getAddress());
 
-    function getDomain(forwarder, chainId) {
-        return {
-            name: "MyDefaultForwarder",
-            version: "1",
-            chainId,
-            verifyingContract: forwarder,
-        };
-    }
-
-    const types = {
-        ForwardRequest: [
-            { name: "from", type: "address" },
-            { name: "to", type: "address" },
-            { name: "value", type: "uint256" },
-            { name: "gas", type: "uint256" },
-            { name: "nonce", type: "uint256" },
-            { name: "deadline", type: "uint48" },
-            { name: "data", type: "bytes" },
-        ]
+    const net = await user.provider.getNetwork();
+    domain = {
+      name: "MyDefaultForwarder",
+      version: "1",
+      chainId: Number(net.chainId), // ethers v6는 bigint -> number 변환 필요
+      verifyingContract: await forwarder.getAddress(),
     };
+  });
 
-    async function buildRequest(signer, to, value, data, overrideNonce = null, overrideDeadline = null) {
-        const nonce = overrideNonce !== null ? overrideNonce : await forwarder.nonces(signer.address);
-        const deadline = overrideDeadline !== null ? overrideDeadline : Math.floor(Date.now() / 1000) + 600;
-        return {
-            from: signer.address,
-            to,
-            value,
-            gas: 100000,
-            nonce,
-            deadline,
-            data,
+  // EIP-712 타입: nonce 포함, deadline은 uint48 이어야 함
+  const EIP712_TYPES = {
+    ForwardRequest: [
+      { name: "from", type: "address" },
+      { name: "to", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "gas", type: "uint256" },
+      { name: "nonce", type: "uint256" },
+      { name: "deadline", type: "uint48" },
+      { name: "data", type: "bytes" },
+    ],
+  };
+
+  async function buildRequestToSend(from, to, value, data, gas = 300_000) {
+    const deadline = Math.floor(Date.now() / 1000) + 3600; // +1h
+    return {
+      from: from.address,
+      to,
+      value,
+      gas,
+      deadline,
+      data,
+      signature: "0x",
+    };
+  }
+
+  async function signForForwarder(signer, reqToSend) {
+    // 서명에는 nonce가 필요하지만, execute에 넘기는 struct에는 넣지 않음
+    const nonce = await forwarder.nonces(signer.address);
+    const forSigning = {
+      from: reqToSend.from,
+      to: reqToSend.to,
+      value: reqToSend.value,
+      gas: reqToSend.gas,
+      nonce, // EIP-712에만 포함
+      deadline: reqToSend.deadline,
+      data: reqToSend.data,
+    };
+    const signature = await signer.signTypedData(domain, EIP712_TYPES, forSigning);
+    return { ...reqToSend, signature };
+  }
+
+  // 헬퍼: 명시적 nonce로 서명
+    async function signForForwarderWithNonce(signer, reqToSend, explicitNonce) {
+        const forSigning = {
+        from: reqToSend.from,
+        to: reqToSend.to,
+        value: reqToSend.value,
+        gas: reqToSend.gas,
+        nonce: explicitNonce,            // <-- 여기!
+        deadline: reqToSend.deadline,
+        data: reqToSend.data,
         };
+        const signature = await signer.signTypedData(domain, EIP712_TYPES, forSigning);
+        return { ...reqToSend, signature };
     }
+  
 
-    async function signRequest(signer, domain, request) {
-        const signature = await signer.signTypedData(domain, types, request);
-        return { ...request, signature };
-    }
+  describe("execute", function () {
+    it("executes the meta-tx successfully and updates message", async function () {
+      const message = "Hello World";
+      const data = receiver.interface.encodeFunctionData("setMessage", [message]);
 
-    describe("execute", function () {
-        it("should execute the meta-transaction successfully", async function () {
-            const message = "Hello, world!";
-            const data = receiver.interface.encodeFunctionData("setMessage", [message]);
+      const req = await buildRequestToSend(user, await receiver.getAddress(), 0, data);
+      const signed = await signForForwarder(user, req);
 
-            const request = await buildRequest(user, await receiver.getAddress(), 0, data);
-            const domain = getDomain(await forwarder.getAddress(), await user.provider.getNetwork().then(n => n.chainId));
-            const signed = await signRequest(user, domain, request);
+      await expect(forwarder.connect(relayer).execute(signed, { gasLimit: 2_000_000 }))
+        .to.not.be.reverted;
 
-            await expect(forwarder.connect(relayer).execute(signed)).to.emit(forwarder, "ExecutedForwardRequest");
-            expect(await receiver.message()).to.equal(message);
-        });
-
-        it("should revert if the signature is invalid", async function () {
-            const message = "Invalid sig test!";
-            const data = receiver.interface.encodeFunctionData("setMessage", [message]);
-
-            const request = await buildRequest(user, await receiver.getAddress(), 0, data);
-            const domain = getDomain(await forwarder.getAddress(), await user.provider.getNetwork().then(n => n.chainId));
-            const signed = await signRequest(signer, domain, request);
-
-            await expect(forwarder.connect(relayer).execute(signed)).to.be.revertedWithCustomError(forwarder, "ERC2771ForwarderInvalidSigner");
-        });
-
-        it("should revert if the request has expired", async function () {
-            const message = "Expired!";
-            const data = receiver.interface.encodeFunctionData("setMessage", [message]);
-
-            const nonce = await forwarder.nonces(user.address);
-            const request = {
-                from: user.address,
-                to: await receiver.getAddress(),
-                value: 0,
-                gas: 100000,
-                nonce,
-                deadline: Math.floor(Date.now() / 1000) - 10,
-                data,
-            };
-            const domain = getDomain(await forwarder.getAddress(), await user.provider.getNetwork().then(n => n.chainId));
-            const signed = await signRequest(user, domain, request);
-
-            await expect(forwarder.connect(relayer).execute(signed)).to.be.revertedWithCustomError(forwarder, "ERC2771ForwarderExpiredRequest");
-        });
+      expect(await receiver.message()).to.equal(message);
     });
 
-    describe("executeBatch", function () {
-        it("should execute a batch of meta-transactions", async function () {
-            const value = 2000n;
+    it("reverts on invalid signature", async function () {
+      const message = "Hello World";
+      const data = receiver.interface.encodeFunctionData("setMessage", [message]);
 
-            const data1 = receiver.interface.encodeFunctionData("setMessage", ["Batch #1"]);
-            const data2 = receiver.interface.encodeFunctionData("setMessage", ["Batch #2"]);
+      const req = await buildRequestToSend(user, await receiver.getAddress(), 0, data);
+      req.signature = "0x1234567890abcdef"; // 잘못된 서명
 
-
-            const nonce = await forwarder.nonces(user.address);
-            const request1 = await buildRequest(user, await receiver.getAddress(), value, data1, nonce);
-            const request2 = await buildRequest(user, await receiver.getAddress(), value, data2, nonce + 1n);
-
-            const domain = getDomain(await forwarder.getAddress(), await user.provider.getNetwork().then(n => n.chainId));
-            const signed1 = await signRequest(user, domain, request1);
-            const signed2 = await signRequest(user, domain, request2);
-
-            const totalValue = signed1.value + signed2.value;
-
-            const batch = [signed1, signed2];
-
-            await forwarder.connect(relayer).executeBatch(batch, relayer.address, { value: totalValue });
-            const finalMessage = await receiver.message();
-            expect(finalMessage).to.equal("Batch #2");
-        });
-
-        it("should refund value for failed requests in batch", async function () {
-            // Deploy Refunder contract
-            const Refunder = await ethers.getContractFactory("Refunder");
-            const refunder = await Refunder.deploy();
-            await refunder.waitForDeployment();
-        
-            const value = 2000n;
-        
-            const data1 = receiver.interface.encodeFunctionData("setMessage", ["Batch 1"]);
-            const data2 = "0xdeadbeef"; // Invalid call to cause failure
-        
-            const nonce = await forwarder.nonces(user.address);
-            const request1 = await buildRequest(user, await receiver.getAddress(), value, data1, nonce);
-            const request2 = await buildRequest(user, await receiver.getAddress(), value, data2, nonce + 1n);
-        
-            const domain = getDomain(await forwarder.getAddress(), await user.provider.getNetwork().then(n => n.chainId));
-            const signed1 = await signRequest(user, domain, request1);
-            const signed2 = await signRequest(user, domain, request2);
-        
-            const totalValue = signed1.value + signed2.value;
-        
-            const before = await ethers.provider.getBalance(await refunder.getAddress());
-        
-            await forwarder.connect(relayer).executeBatch(
-                [signed1, signed2],
-                await refunder.getAddress(),
-                { value: totalValue }
-            );
-        
-            const after = await ethers.provider.getBalance(await refunder.getAddress());
-            const refunded = after - before;
-            
-            expect(refunded).to.equal(value); // 하나는 실패했으니 value 하나만 환불됨
-        });
-        
-
-        it("should revert if msg.value does not match request total", async function () {
-            const data1 = receiver.interface.encodeFunctionData("setMessage", ["Mismatch"]);
-
-            const request = await buildRequest(user, await receiver.getAddress(), 1000, data1);
-            const domain = getDomain(await forwarder.getAddress(), await user.provider.getNetwork().then(n => n.chainId));
-            const signed = await signRequest(user, domain, request);
-
-            await expect(
-                forwarder.connect(relayer).executeBatch([signed], relayer.address, { value: 0 })
-            ).to.be.revertedWithCustomError(forwarder, "ERC2771ForwarderMismatchedValue");
-        });
+      await expect(forwarder.connect(relayer).execute(req, { gasLimit: 2_000_000 }))
+        .to.be.revertedWithCustomError(forwarder, "ERC2771ForwarderInvalidSigner");
     });
+
+    it("reverts on expired request", async function () {
+      const message = "Hello World";
+      const data = receiver.interface.encodeFunctionData("setMessage", [message]);
+
+      const req = await buildRequestToSend(user, await receiver.getAddress(), 0, data);
+      req.deadline = Math.floor(Date.now() / 1000) - 3600; // 지난 시간
+      const signed = await signForForwarder(user, req);
+
+      await expect(forwarder.connect(relayer).execute(signed, { gasLimit: 2_000_000 }))
+        .to.be.revertedWithCustomError(forwarder, "ERC2771ForwarderExpiredRequest");
+    });
+
+    it("bubbles revert reason from target (revert1)", async function () {
+      const data = receiver.interface.encodeFunctionData("setMessage", ["revert1"]);
+      const req = await buildRequestToSend(user, await receiver.getAddress(), 0, data);
+      const signed = await signForForwarder(user, req);
+
+      await expect(forwarder.connect(relayer).execute(signed, { gasLimit: 2_000_000 }))
+        .to.be.revertedWith("revert1");
+    });
+
+    it("bubbles revert reason from target (revert2)", async function () {
+      const data = receiver.interface.encodeFunctionData("setMessage", ["revert2"]);
+      const req = await buildRequestToSend(user, await receiver.getAddress(), 0, data);
+      const signed = await signForForwarder(user, req);
+
+      await expect(forwarder.connect(relayer).execute(signed, { gasLimit: 2_000_000 }))
+        .to.be.revertedWith("revert2");
+    });
+
+    it("emits ExecutedForwardRequest on success", async function () {
+      const message = "Hello World";
+      const data = receiver.interface.encodeFunctionData("setMessage", [message]);
+
+      const req = await buildRequestToSend(user, await receiver.getAddress(), 0, data);
+      const signed = await signForForwarder(user, req);
+
+      await expect(forwarder.connect(relayer).execute(signed, { gasLimit: 2_000_000 }))
+        .to.emit(forwarder, "ExecutedForwardRequest")
+        .withArgs(user.address, 0n, true); // signer, nonce, success
+    });
+  });
+
+  describe("executeBatch", function () {
+    it("executes a batch of meta-transactions (both succeed)", async function () {
+        const m1 = "Hello 1";
+        const m2 = "Hello 2";
+        const d1 = receiver.interface.encodeFunctionData("setMessage", [m1]);
+        const d2 = receiver.interface.encodeFunctionData("setMessage", [m2]);
+      
+        const base = await forwarder.nonces(user.address); // N
+        const r1Unsigned = await buildRequestToSend(user, await receiver.getAddress(), 0, d1);
+        const r2Unsigned = await buildRequestToSend(user, await receiver.getAddress(), 0, d2);
+      
+        const r1 = await signForForwarderWithNonce(user, r1Unsigned, base);       // N
+        const r2 = await signForForwarderWithNonce(user, r2Unsigned, base + 1n);  // N+1 (ethers v6 bigint)
+      
+        const tx = await forwarder.connect(relayer).executeBatch([r1, r2], ethers.ZeroAddress, { gasLimit: 3_000_000 });
+      
+        await expect(tx).to.emit(forwarder, "ExecutedForwardRequest").withArgs(user.address, base, true);
+        await expect(tx).to.emit(forwarder, "ExecutedForwardRequest").withArgs(user.address, base + 1n, true);
+      
+        expect(await receiver.message()).to.equal(m2);
+    });
+      
+
+    it("does NOT revert when one inner call reverts; emits success=false for that item", async function () {
+        const m1 = "Hello 1";
+        const d1 = receiver.interface.encodeFunctionData("setMessage", [m1]);
+        const d2 = receiver.interface.encodeFunctionData("setMessage", ["revert1"]);
+      
+        const base = await forwarder.nonces(user.address); // N
+        const r1Unsigned = await buildRequestToSend(user, await receiver.getAddress(), 0, d1);
+        const r2Unsigned = await buildRequestToSend(user, await receiver.getAddress(), 0, d2);
+      
+        const r1 = await signForForwarderWithNonce(user, r1Unsigned, base);       // N
+        const r2 = await signForForwarderWithNonce(user, r2Unsigned, base + 1n);  // N+1
+      
+        const tx = await forwarder.connect(relayer).executeBatch([r1, r2], ethers.ZeroAddress, { gasLimit: 3_000_000 });
+      
+        await expect(tx).to.emit(forwarder, "ExecutedForwardRequest").withArgs(user.address, base, true);
+        await expect(tx).to.emit(forwarder, "ExecutedForwardRequest").withArgs(user.address, base + 1n, false);
+      
+        expect(await receiver.message()).to.equal(m1);
+    });
+      
+
+    it("reverts when msg.value mismatches total requested value", async function () {
+      const message = "Hello World";
+      const data = receiver.interface.encodeFunctionData("setMessage", [message]);
+
+      const r = await signForForwarder(user, await buildRequestToSend(user, await receiver.getAddress(), ethers.parseEther("1"), data));
+
+      await expect(
+        forwarder.connect(relayer).executeBatch([r], ethers.ZeroAddress, { value: 0, gasLimit: 2_000_000 })
+      ).to.be.revertedWithCustomError(forwarder, "ERC2771ForwarderMismatchedValue");
+    });
+  });
+
+  describe("domain separator", function () {
+    it("returns correct domain separator", async function () {
+      const expectedDomain = ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          ["bytes32", "bytes32", "bytes32", "uint256", "address"],
+          [
+            ethers.keccak256(
+              ethers.toUtf8Bytes("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
+            ),
+            ethers.keccak256(ethers.toUtf8Bytes("MyDefaultForwarder")),
+            ethers.keccak256(ethers.toUtf8Bytes("1")),
+            Number((await user.provider.getNetwork()).chainId),
+            await forwarder.getAddress()
+          ]
+        )
+      );
+      expect(await forwarder.domainSeparator()).to.equal(expectedDomain);
+    });
+  });
 });
-

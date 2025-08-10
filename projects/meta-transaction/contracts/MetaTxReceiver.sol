@@ -13,10 +13,28 @@ contract MetaTxReceiver is ERC2771Context {
     constructor(address forwarder) ERC2771Context(forwarder) {}
 
     function setMessage(string calldata newMessage) external payable {
-        message = newMessage;
-        lastSender = _msgSender();
-        emit MetaTxDebug(_msgSender(), msg.data);
-        emit MessageUpdated(newMessage, _msgSender());
+        if(keccak256(bytes(newMessage)) == keccak256(bytes("revert1"))) {
+            revert("revert1");
+        } else if(keccak256(bytes(newMessage)) == keccak256(bytes("revert2"))) {
+            revert("revert2");
+        } else if(keccak256(bytes(newMessage)) == keccak256(bytes("revert3"))) {
+            revert("revert3");
+        } else if(keccak256(bytes(newMessage)) == keccak256(bytes("revert4"))) {
+            revert("revert4");
+        } else if(keccak256(bytes(newMessage)) == keccak256(bytes("revert5"))) {
+            revert("revert5");
+        } else if(keccak256(bytes(newMessage)) == keccak256(bytes("revert6"))) {
+            revert("revert6");
+        } else if(keccak256(bytes(newMessage)) == keccak256(bytes("revert7"))) {   
+            revert("revert7");
+        } else if(keccak256(bytes(newMessage)) == keccak256(bytes("revert8"))) {
+            revert("revert8");
+        } else {
+            message = newMessage;
+            lastSender = _msgSender();  
+            emit MetaTxDebug(_msgSender(), msg.data);
+            emit MessageUpdated(newMessage, _msgSender());
+        }
     }
     
     function _msgSender() internal view override returns (address sender) {

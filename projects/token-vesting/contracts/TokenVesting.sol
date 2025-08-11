@@ -30,7 +30,7 @@ contract TokenVesting is Ownable, ReentrancyGuard {
 
     uint256 public immutable vestingStartDate; // 예: 2025-06-03 00:00:00 (UTC)
     uint256 public constant SECONDS_PER_DAY = 86400;
-    uint256 public constant DAYS_PER_YEAR   = 365;
+    uint256 public constant DAYS_PER_YEAR   = 365; // (참고 상수, 실 계산엔 termDays 사용)
 
     uint256 public constant BUYBACK_PCT = 10; // 10%
     bool    public floorTo6 = true;           // 18 → 소수점 6자리 절삭 지급
@@ -153,7 +153,7 @@ contract TokenVesting is Ownable, ReentrancyGuard {
 
     /**
      * @notice 커스텀 스케줄을 1회 초기화(연차 경계/총량)
-     * @param _poolEnds   연차별 종료시각(inclusive), strictly increasing & > start
+     * @param _poolEnds   연차별 종료시각(inclusive, epoch sec), strictly increasing & > start
      * @param _buyerTotals 연차별 구매자 총량(18dec)
      * @param _refTotals   연차별 추천인 총량(18dec)
      */
@@ -179,41 +179,6 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         poolEndTimes = _poolEnds;
         buyerYearTotals = _buyerTotals;
         refYearTotals   = _refTotals;
-
-        scheduleInitialized = true;
-    }
-
-    /**
-     * @notice “기본 4년 스케줄”을 1회 초기화(기존 하드코드 값으로 강제 설정)
-     * - end1 = start + 365d - 1; end2 = end1 + 1 + 365d -1; ...
-     * - buyerTotals = [170M, 87.5M, 52.5M, 40M] (18dec)
-     * - refTotals   = [15M, 15M, 0, 0]
-     */
-    function initializeDefaultSchedule() external onlyOwner {
-        require(!scheduleInitialized, "schedule inited");
-
-        uint256 end1 = vestingStartDate + SECONDS_PER_DAY * DAYS_PER_YEAR - 1;
-        uint256 end2 = end1 + 1 + SECONDS_PER_DAY * DAYS_PER_YEAR - 1;
-        uint256 end3 = end2 + 1 + SECONDS_PER_DAY * DAYS_PER_YEAR - 1;
-        uint256 end4 = end3 + 1 + SECONDS_PER_DAY * DAYS_PER_YEAR - 1;
-
-        poolEndTimes = new uint256[](4);
-        poolEndTimes[0] = end1;
-        poolEndTimes[1] = end2;
-        poolEndTimes[2] = end3;
-        poolEndTimes[3] = end4;
-
-        buyerYearTotals = new uint256[](4);
-        buyerYearTotals[0] = 170_000_000 ether;
-        buyerYearTotals[1] = 87_500_000 ether;
-        buyerYearTotals[2] = 52_500_000 ether;
-        buyerYearTotals[3] = 40_000_000 ether;
-
-        refYearTotals = new uint256[](4);
-        refYearTotals[0] = 15_000_000 ether;
-        refYearTotals[1] = 15_000_000 ether;
-        refYearTotals[2] = 0;
-        refYearTotals[3] = 0;
 
         scheduleInitialized = true;
     }
@@ -253,7 +218,19 @@ contract TokenVesting is Ownable, ReentrancyGuard {
 
     function _yearStartTs(uint256 y) internal view returns (uint256) {
         if (y == 0) return vestingStartDate;
-        return poolEndTimes[y - 1] + 1;
+        return poolEndTimes[y - 1] + 1; // inclusive end 다음 초가 다음 연차 시작
+    }
+
+    function _yearEndTs(uint256 y) internal view returns (uint256) {
+        return poolEndTimes[y]; // inclusive
+    }
+
+    /// @notice 해당 연차의 ‘일수’ (inclusive)
+    function _termDays(uint256 y) internal view returns (uint256) {
+        uint256 s = _yearStartTs(y);
+        uint256 e = _yearEndTs(y);
+        // e는 항상 s 이후이고, e가 inclusive이므로 +1
+        return ((e - s) / SECONDS_PER_DAY) + 1;
     }
 
     function _yearByTs(uint256 dayStartTs) internal view returns (uint256) {
@@ -266,9 +243,13 @@ contract TokenVesting is Ownable, ReentrancyGuard {
 
     function _inYearIndex(uint256 dayStartTs, uint256 yearIdx) internal view returns (uint256) {
         uint256 yStart = _yearStartTs(yearIdx);
-        return (dayStartTs - yStart) / SECONDS_PER_DAY; // 0..364 (기본 스케줄 기준)
+        // 0..(termDays-1)
+        return (dayStartTs - yStart) / SECONDS_PER_DAY;
     }
 
+    /**
+     * @notice 자정 시각 기준 일일 풀 계산(마지막 날 보정 포함) — 연차별 실제 일수(termDays) 기반
+     */
     function _dailyPoolRawByTs(uint256 dayStartTs, bool forBuyer) internal view returns (uint256) {
         if (!scheduleInitialized) return 0;
         uint256 y = _yearByTs(dayStartTs);
@@ -277,10 +258,14 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         uint256 total = forBuyer ? buyerYearTotals[y] : refYearTotals[y];
         if (total == 0) return 0;
 
-        uint256 inYear = _inYearIndex(dayStartTs, y);
-        uint256 base = total / DAYS_PER_YEAR;
-        if (inYear == DAYS_PER_YEAR - 1) {
-            return total - base * (DAYS_PER_YEAR - 1);
+        uint256 yStart = _yearStartTs(y);
+        uint256 inYear = (dayStartTs - yStart) / SECONDS_PER_DAY; // 0..termDays-1
+        uint256 termDays = _termDays(y);
+
+        uint256 base = total / termDays;
+        if (inYear == termDays - 1) {
+            // 마지막 날 잔여 보정
+            return total - base * (termDays - 1);
         }
         return base;
     }
@@ -465,7 +450,7 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     }
 
     // ---------------------------
-    // Claim (SPLA / USDT buyback)
+    // Claim (vesting token / USDT buyback)
     // ---------------------------
 
     function setVestingToken(address _token) external onlyOwner {
@@ -794,6 +779,10 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         require(IERC20(token).transfer(to, amount), "withdraw failed");
     }
 
+    // ---------------------------
+    // Public views (totals)
+    // ---------------------------
+
     function getYearTotals(uint256 year) external view returns (uint256 buyerTotal, uint256 refTotal) {
         require(scheduleInitialized, "no schedule");
         require(year < yearCount(), "year oob");
@@ -804,5 +793,4 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         require(scheduleInitialized, "no schedule");
         return (buyerYearTotals, refYearTotals);
     }
-
 }

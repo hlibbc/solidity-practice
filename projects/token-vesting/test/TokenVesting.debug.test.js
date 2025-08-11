@@ -14,13 +14,35 @@ describe("TokenVesting (JS tests, Usdt.sol present, dynamic years, referral stri
     const USDT = await ethers.getContractFactory("Usdt");
     const usdt = await USDT.deploy();
 
-    // 2) Deploy TokenVesting(start=now) and initialize default schedule
+    // 2) Deploy TokenVesting(start=now) and initialize schedule (epoch-based)
     const now = (await ethers.provider.getBlock("latest")).timestamp;
     const start = now;
 
     const TV = await ethers.getContractFactory("TokenVesting");
     const vesting = await TV.deploy(await usdt.getAddress(), start);
-    await vesting.initializeDefaultSchedule();
+
+    // 기본 4개 term: 각 365일 (inclusive end = start - 1 + N*365d)
+    const ends = [
+      start - 1 + SECONDS_PER_DAY * 365,
+      start - 1 + SECONDS_PER_DAY * 365 * 2,
+      start - 1 + SECONDS_PER_DAY * 365 * 3,
+      start - 1 + SECONDS_PER_DAY * 365 * 4,
+    ];
+
+    const buyerTotals = [
+      ethers.parseEther("170000000"),
+      ethers.parseEther("87500000"),
+      ethers.parseEther("52500000"),
+      ethers.parseEther("40000000"),
+    ];
+    const refTotals = [
+      ethers.parseEther("15000000"),
+      ethers.parseEther("15000000"),
+      0n,
+      0n,
+    ];
+
+    await vesting.initializeSchedule(ends, buyerTotals, refTotals);
 
     // 3) Fund buyer
     const BOX_PRICE_UNITS = await vesting.BOX_PRICE_UNITS(); // 350 * 10^6

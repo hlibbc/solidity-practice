@@ -4,7 +4,8 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-const SECONDS_PER_DAY = 86400;
+const SECONDS_PER_DAY = 86400n; // bigint 일관성
+const ONE_USDT = 10n ** 6n;     // 6 decimals
 
 describe("TokenVesting (JS tests, Usdt.sol present, dynamic years, referral string)", function () {
   async function deployFixture() {
@@ -15,7 +16,7 @@ describe("TokenVesting (JS tests, Usdt.sol present, dynamic years, referral stri
     const usdt = await USDT.deploy();
 
     // 2) Deploy TokenVesting(start=now) and initialize schedule (epoch-based)
-    const now = (await ethers.provider.getBlock("latest")).timestamp;
+    const now = BigInt((await ethers.provider.getBlock("latest")).timestamp);
     const start = now;
 
     const TV = await ethers.getContractFactory("TokenVesting");
@@ -23,10 +24,10 @@ describe("TokenVesting (JS tests, Usdt.sol present, dynamic years, referral stri
 
     // 기본 4개 term: 각 365일 (inclusive end = start - 1 + N*365d)
     const ends = [
-      start - 1 + SECONDS_PER_DAY * 365,
-      start - 1 + SECONDS_PER_DAY * 365 * 2,
-      start - 1 + SECONDS_PER_DAY * 365 * 3,
-      start - 1 + SECONDS_PER_DAY * 365 * 4,
+      start - 1n + SECONDS_PER_DAY * 365n,
+      start - 1n + SECONDS_PER_DAY * 365n * 2n,
+      start - 1n + SECONDS_PER_DAY * 365n * 3n,
+      start - 1n + SECONDS_PER_DAY * 365n * 4n,
     ];
 
     const buyerTotals = [
@@ -44,47 +45,46 @@ describe("TokenVesting (JS tests, Usdt.sol present, dynamic years, referral stri
 
     await vesting.initializeSchedule(ends, buyerTotals, refTotals);
 
-    // 3) Fund buyer
-    const BOX_PRICE_UNITS = await vesting.BOX_PRICE_UNITS(); // 350 * 10^6
-    await usdt.transfer(await buyer.getAddress(), BOX_PRICE_UNITS * 10n);
-
-    // 4) Seed a referral code for `referrer` on d=1 (코드만 생성, d=1 분모에는 영향 없음)
+    // 3) Seed a referral code for `referrer` on d=1 (코드만 생성, d=1 분모에는 영향 없음)
     const tsD1 = start + SECONDS_PER_DAY; // d=1
     await vesting.adminBackfillPurchaseAt(
       await other.getAddress(),        // dummy buyer
       await referrer.getAddress(),     // target referrer to assign code
-      1,                               // minimal amount
+      1n,                              // minimal amount
       tsD1,                            // record on d=1
-      BOX_PRICE_UNITS * 1n,
+      ONE_USDT * 1n,
       false
     );
     const refCode = await vesting.myReferralCodeString(await referrer.getAddress());
 
-    return { deployer, buyer, referrer, other, usdt, vesting, start, BOX_PRICE_UNITS, refCode };
+    return { deployer, buyer, referrer, other, usdt, vesting, start, refCode };
   }
 
   async function increaseTime(seconds) {
-    await ethers.provider.send("evm_increaseTime", [seconds]);
+    // seconds: number | bigint 둘 다 허용 → number로 변환
+    const sec = Number(seconds);
+    await ethers.provider.send("evm_increaseTime", [sec]);
     await ethers.provider.send("evm_mine", []);
   }
 
   it("구매 → 자정 동기화 → claimable 조회(구매자/추천인) 기본 흐름", async () => {
-    const { buyer, referrer, usdt, vesting, BOX_PRICE_UNITS, refCode, start } = await deployFixture();
+    const { buyer, referrer, vesting, refCode, start } = await deployFixture();
 
     const boxCount = 2n;
-    const cost = BOX_PRICE_UNITS * boxCount;
 
-    await usdt.connect(buyer).approve(await vesting.getAddress(), cost);
-    await expect(vesting.connect(buyer).buyBox(boxCount, refCode))
+    // permit 스킵용 제로 파라미터
+    const pSkip = { value: 0n, deadline: 0n, v: 0, r: ethers.ZeroHash, s: ethers.ZeroHash };
+
+    await expect(vesting.connect(buyer).buyBox(boxCount, refCode, pSkip))
       .to.emit(vesting, "BoxesPurchased");
 
     // (A) 먼저 preview로 기대값 생성 (d=1까지 가정)
-    const ts = start + SECONDS_PER_DAY * 2;
+    const ts = start + SECONDS_PER_DAY * 2n;
     const expectedBuyer = await vesting.previewBuyerClaimableAt(await buyer.getAddress(), ts);
     const expectedRef   = await vesting.previewReferrerClaimableAt(await referrer.getAddress(), ts);
 
     // (B) 실제로 2일 경과 + sync
-    await increaseTime(SECONDS_PER_DAY * 2 + 3);
+    await increaseTime(SECONDS_PER_DAY * 2n + 3n);
     await vesting.sync();
 
     // (C) 확정 결과가 preview와 동일해야 함
@@ -92,12 +92,12 @@ describe("TokenVesting (JS tests, Usdt.sol present, dynamic years, referral stri
     expect(await vesting.getReferrerClaimableReward(await referrer.getAddress())).to.equal(expectedRef);
   });
 
-  it("buyBoxWithPermit(EIP-2612) 경로 동작", async () => {
-    const { buyer, usdt, vesting, BOX_PRICE_UNITS, refCode } = await deployFixture();
+  it("buyBox(EIP-2612 permit 경로) 동작", async () => {
+    const { buyer, usdt, vesting, refCode } = await deployFixture();
 
     const boxCount = 1n;
-    const cost = BOX_PRICE_UNITS * boxCount;
-    const deadline = (await ethers.provider.getBlock("latest")).timestamp + 3600;
+    const cost = ONE_USDT * boxCount; // 실제 전송은 0이지만, permit 테스트용으로 non-zero도 OK
+    const deadline = BigInt((await ethers.provider.getBlock("latest")).timestamp) + 3600n;
 
     const name = await usdt.name();
     const chainId = (await ethers.provider.getNetwork()).chainId;
@@ -123,22 +123,22 @@ describe("TokenVesting (JS tests, Usdt.sol present, dynamic years, referral stri
       spender: await vesting.getAddress(),
       value: cost,
       nonce,
-      deadline,
+      deadline: Number(deadline),
     };
 
     const sig = await buyer.signTypedData(domain, types, message);
     const { v, r, s } = ethers.Signature.from(sig);
 
     await expect(
-      vesting.connect(buyer).buyBoxWithPermit(boxCount, refCode, { value: cost, deadline, v, r, s })
+      vesting.connect(buyer).buyBox(boxCount, refCode, { value: cost, deadline, v, r, s })
     ).to.emit(vesting, "BoxesPurchased");
   });
 
   it("adminBackfillPurchaseAt: 시작일 이전 구매는 Day0 기록, Day1부터 분모 반영", async () => {
-    const { deployer, buyer, referrer, vesting, BOX_PRICE_UNITS } = await deployFixture();
+    const { deployer, buyer, referrer, vesting, start } = await deployFixture();
 
     const boxCount = 5n;
-    const pastTs = (await ethers.provider.getBlock("latest")).timestamp - SECONDS_PER_DAY * 10;
+    const pastTs = BigInt((await ethers.provider.getBlock("latest")).timestamp) - SECONDS_PER_DAY * 10n;
 
     await expect(
       vesting.connect(deployer).adminBackfillPurchaseAt(
@@ -146,7 +146,7 @@ describe("TokenVesting (JS tests, Usdt.sol present, dynamic years, referral stri
         await referrer.getAddress(),
         boxCount,
         pastTs, // < start → d=0
-        BOX_PRICE_UNITS * boxCount,
+        ONE_USDT * boxCount,
         true
       )
     ).to.not.be.reverted;
@@ -155,36 +155,36 @@ describe("TokenVesting (JS tests, Usdt.sol present, dynamic years, referral stri
     expect(await vesting.getBuyerClaimableReward(await buyer.getAddress())).to.equal(0);
 
     // 2일 경과 후 sync → d>=1 확정
-    await increaseTime(SECONDS_PER_DAY * 2 + 1);
+    await increaseTime(SECONDS_PER_DAY * 2n + 1n);
     await vesting.sync();
 
-    const lastFinal = (await vesting.lastSyncedDay()) - 1n;
+    const lastSynced = await vesting.lastSyncedDay(); // bigint
+    const lastFinal = lastSynced - 1n;
     const cumBuyer  = await vesting.cumRewardPerBox(lastFinal);
     const expectedBuyer = cumBuyer * boxCount;
     expect(await vesting.getBuyerClaimableReward(await buyer.getAddress())).to.equal(expectedBuyer);
   });
 
   it("preview* 미리보기: 확정 전/후의 금액이 서로 일치", async () => {
-    const { buyer, referrer, usdt, vesting, BOX_PRICE_UNITS, start, refCode } = await deployFixture();
+    const { buyer, referrer, vesting, start, refCode } = await deployFixture();
 
     const boxCount = 2n;
-    const cost = BOX_PRICE_UNITS * boxCount;
+    const pSkip = { value: 0n, deadline: 0n, v: 0, r: ethers.ZeroHash, s: ethers.ZeroHash };
 
-    await usdt.connect(buyer).approve(await vesting.getAddress(), cost);
-    await vesting.connect(buyer).buyBox(boxCount, refCode);
+    await vesting.connect(buyer).buyBox(boxCount, refCode, pSkip);
 
     // 아직 확정 전 → 0
     expect(await vesting.getBuyerClaimableReward(await buyer.getAddress())).to.equal(0);
     expect(await vesting.getReferrerClaimableReward(await referrer.getAddress())).to.equal(0);
 
-    const ts = start + SECONDS_PER_DAY * 2;
+    const ts = start + SECONDS_PER_DAY * 2n;
 
     // 미리보기 금액(확정 전)
     const previewBuyer = await vesting.previewBuyerClaimableAt(await buyer.getAddress(), ts);
     const previewRef   = await vesting.previewReferrerClaimableAt(await referrer.getAddress(), ts);
 
     // 2일 후 sync → 실제 확정 금액
-    await increaseTime(SECONDS_PER_DAY * 2 + 1);
+    await increaseTime(SECONDS_PER_DAY * 2n + 1n);
     await vesting.sync();
 
     const afterBuyer = await vesting.getBuyerClaimableReward(await buyer.getAddress());
@@ -195,13 +195,23 @@ describe("TokenVesting (JS tests, Usdt.sol present, dynamic years, referral stri
   });
 
   it("USDT 바이백 인출(추천인)", async () => {
-    const { buyer, referrer, usdt, vesting, BOX_PRICE_UNITS, refCode } = await deployFixture();
+    const { deployer, buyer, referrer, usdt, vesting, start } = await deployFixture();
 
-    const boxCount = 3n;
-    const cost = BOX_PRICE_UNITS * boxCount;
+    // 과거 구매 1건을 백필 + 바이백 적립
+    const paid = ONE_USDT * 123n;
+    await vesting.connect(deployer).adminBackfillPurchaseAt(
+      await buyer.getAddress(),
+      await referrer.getAddress(),
+      1n,
+      start + SECONDS_PER_DAY, // d=1
+      paid,
+      true // ✅ buyback 적립
+    );
 
-    await usdt.connect(buyer).approve(await vesting.getAddress(), cost);
-    await vesting.connect(buyer).buyBox(boxCount, refCode);
+    const expectedBuyback = (paid * 10n) / 100n;
+
+    // 컨트랙트가 바이백 지급할 USDT 보유하도록 선입금
+    await usdt.transfer(await vesting.getAddress(), expectedBuyback);
 
     const before = await usdt.balanceOf(await referrer.getAddress());
     const buyback = await vesting.getBuybackBalance(await referrer.getAddress());

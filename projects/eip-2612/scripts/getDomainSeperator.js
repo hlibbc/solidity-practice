@@ -19,10 +19,19 @@ async function main() {
     // const testVersion = "1";                    // 버전
     // const testChainId = 31337n;                 // 체인 ID (hardhat 기본값)
     // const testVerifyingContract = "0xa85233C63b9Ee964Add6F2cffe00Fd84eb32338f"; // 컨트랙트 주소
-    const testName = "USD₮0";           // 컨트랙트 이름
-    const testVersion = "1";                    // 버전
-    const testChainId = 42161n;                 // 체인 ID (hardhat 기본값)
-    const testVerifyingContract = "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"; // 컨트랙트 주소
+    
+    //// Arbitrum USDT
+    // const testName = "USD₮0";           // 컨트랙트 이름
+    // const testVersion = "1";                    // 버전
+    // const testChainId = 42161n;                 // 체인 ID (hardhat 기본값)
+    // const testVerifyingContract = "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"; // 컨트랙트 주소
+
+    // //// Base USDT
+    const testName = "USD Coin";           // 컨트랙트 이름
+    const testVersion = "2";                    // 버전
+    const testChainId = 8453n;                 // 체인 ID (hardhat 기본값)
+    const testVerifyingContract = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"; // 컨트랙트 주소
+
     // 명령행 인수에서 컨트랙트 주소 가져오기 (없으면 테스트 값 사용)
     const contractAddress = process.argv[2] || testVerifyingContract;
     

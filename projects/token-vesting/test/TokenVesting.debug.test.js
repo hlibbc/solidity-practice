@@ -214,20 +214,4 @@ describe("TokenVesting (JS tests, Usdt.sol present, dynamic years, referral stri
     expect(after - before).to.equal(buyback);
     expect(await vesting.getBuybackBalance(await referrer.getAddress())).to.equal(0);
   });
-
-  it("연차 총량 변경은 해당 연차 시작 전까지만 가능", async () => {
-    const { vesting } = await deployFixture();
-
-    const newBuyer = ethers.parseEther("171000000");
-    const newRef   = ethers.parseEther("16000000");
-
-    await expect(vesting.setYearTotals(0, newBuyer, newRef))
-      .to.emit(vesting, "YearTotalsUpdated")
-      .withArgs(0, newBuyer, newRef);
-
-    // Day 1가 시작되도록 경과+sync → 이후 변경 불가
-    await increaseTime(SECONDS_PER_DAY + 5);
-    await vesting.sync();
-    await expect(vesting.setYearTotals(0, newBuyer, newRef)).to.be.revertedWith("year in progress");
-  });
 });

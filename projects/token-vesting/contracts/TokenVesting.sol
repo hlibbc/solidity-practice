@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/**
- * @title TokenVesting (Timestamp-based midnight tick + Referral by 8-char code) — dynamic years
- * @notice
- *  - 매일 UTC 00:00에 전일 보상 확정(sync)
- *  - 연차 수/연차 경계/연차 총량을 동적 배열로 관리(초기화는 별도 1회 함수)
- *  - 구매는 USDT(EIP-2612 permit) 결제, 결제액 10% 추천인 USDT 바이백 적립
- *  - 레퍼럴: 대문자/숫자 8자리 코드 입력 필수(자기추천 금지), 신규 구매자에게 자동 코드 배정
- *  - 보상 계산은 확정 일별 단위보상의 누적합(prefix-sum) × 체크포인트
- */
-
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -19,16 +9,30 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+/**
+ * @title TokenVesting - 동적 연차 기반 토큰 베스팅 시스템
+ * @notice 
+ *  - 매일 UTC 00:00에 전일 보상 확정(sync)
+ *  - 연차 수/연차 경계/연차 총량을 동적 배열로 관리(초기화는 별도 1회 함수)
+ *  - 구매는 USDT(EIP-2612 permit) 결제, 결제액 10% 추천인 USDT 바이백 적립
+ *  - 레퍼럴: 대문자/숫자 8자리 코드 입력 필수(자기추천 금지), 신규 구매자에게 자동 코드 배정
+ *  - 보상 계산은 확정 일별 단위보상의 누적합(prefix-sum) × 체크포인트
+ * @dev 
+ *  - 베스팅은 자정(UTC 00:00) 기준으로 일별 단위로 처리
+ *  - 구매자 풀과 추천인 풀로 분리되어 각각 독립적으로 보상 계산
+ *  - 체크포인트 기반으로 사용자별 보유량 변화를 추적
+ */
 contract TokenVesting is Ownable, ReentrancyGuard {
 
     using Math for uint256;
 
-    // def. struct
+    /// def. struct
     /**
      * @notice 날짜별 적용될, 박스 누적 보유수량 체크포인트
+     * @notice 체크포인트는 사용자별로 시간순으로 저장되어 보상 계산 시 정확한 보유량 추적
      * @dev
-     * - day: 해당 날짜(포함)부터 효력
-     * - amount: 박스 누적 보유수량(개수)
+     * - day: 해당 날짜(포함)부터 효력이 생기는 일 인덱스
+     * - amount: 해당 시점까지의 누적 박스 보유수량(개수)
      */
     struct BoxAmountCheckpoint {
         uint256 day;
@@ -37,10 +41,11 @@ contract TokenVesting is Ownable, ReentrancyGuard {
 
     /**
      * @notice EIP-2612 기반 permit 서명에 필요한 구조체 정보
+     * @notice USDT 결제 시 approve 없이 서명만으로 결제 가능하게 함
      * @dev
      * - value: permit할 금액 (amount)
      * - deadline: 만료시각 (epoch)
-     * - v/r/s: 서명 인자
+     * - v/r/s: ECDSA 서명의 구성 요소들
      */
     struct PermitData {
         uint256 value;
@@ -50,42 +55,45 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         bytes32 s;
     }
     
-    // def. constant
-    uint256 public constant SECONDS_PER_DAY = 86400; // 1일 (86400초)
-    uint256 public constant BUYBACK_PERCENT = 10; // 10%
+    /// def. constant
+    uint256 public constant SECONDS_PER_DAY = 86400; // 1일 (86400초) - UTC 자정 기준 계산용
+    uint256 public constant BUYBACK_PERCENT = 10; // 추천인 바이백 비율 (10%)
 
-    // def. immutable
-    IERC20  public immutable stableCoin; // 박스구매 재화 (스테이블코인)
-    uint256 public immutable vestingStartDate; // 베스팅 시작시각
+    /// def. immutable
+    IERC20  public immutable stableCoin; // 박스구매 결제용 스테이블코인 (예: USDT)
+    uint256 public immutable vestingStartDate; // 베스팅 시작 시각 (UTC 자정 기준)
 
-    // def. variable
-    IERC20 public vestingToken; // 베스팅할 토큰
+    /// def. variable
+    IERC20 public vestingToken; // 베스팅 지급용 토큰 (ERC20)
     uint256 private constant UNSET = type(uint256).max; // "클레임 이력없음" 표식을 위한 센티널 값
 
     /**
-     * @notice 베스팅 스케줄 관리
-     * @dev poolEndTimes, buyerPools, refYearTotals의 길이는 같아야 함
+     * @notice 베스팅 스케줄 관리 - 연차별 풀 설정
+     * @notice 각 연차마다 구매자 풀과 추천인 풀의 총량을 별도로 설정 가능
+     * @dev poolEndTimes, buyerPools, refererPools의 길이는 반드시 같아야 함
      */
-    bool public scheduleInitialized; // 베스팅스케줄 초기화 완료 여부
-    uint256[] public poolEndTimes; // 베스팅 차수별 종료시각
-    uint256[] private buyerPools; // 차수별 구매자 풀 정보
-    uint256[] private refererPools; // 차수별 레퍼러 풀 정보
+    bool public scheduleInitialized; // 베스팅스케줄 초기화 완료 여부 (1회만 설정 가능)
+    uint256[] public poolEndTimes; // 베스팅 차수별 종료시각 (inclusive, epoch sec)
+    uint256[] private buyerPools; // 차수별 구매자 풀 총량 (18 decimals)
+    uint256[] private refererPools; // 차수별 추천인 풀 총량 (18 decimals)
     
     /**
-     * @notice 동기화 관리
-     * @dev 자정 (UTC00:00) 기준
+     * @notice 동기화 관리 - 자정 기준 일별 보상 확정
+     * @notice sync() 함수 호출 시 nextSyncTs부터 현재까지의 모든 완전한 하루를 처리
+     * @dev 자정 (UTC 00:00) 기준으로 전일 보상을 확정하고 다음 동기화 시점을 계산
      */
     uint256 public nextSyncTs; // 다음에 확정할 자정(UTC 00:00) 타임스탬프 
     uint256 public lastSyncedDay; // 베스팅 시작일 기준, 지금까지 확정(동기화) 완료한 일 수(0-base). 0이면 미확정
     
     /**
-     * @notice vesting 계산을 위한 데이터 관리
-     * @dev 일일 vesting 양 = 토큰풀 / 총 vesting 일수
-     * 박스1개의 리워드 (rewardPerBox[d]) = 일일 vesting 양 * (구매수량(1) / 전체 판매수량(cumBoxes[d]))
-     * cumBoxes[d] = cumBoxes[d-1] + boxesAddedPerDay[d]
-     * cumRewardPerBox[d] = cumRewardPerBox[d-1] + rewardPerBox[d]
-     * day (m) 에 구매한 박스의 day (n) 차 리워드
-     * result = cumRewardPerBox[n] - cumRewardPerBox[m]
+     * @notice vesting 계산을 위한 핵심 데이터 관리 - 일별 누적 데이터
+     * @notice prefix-sum 방식으로 효율적인 보상 계산 구현
+     * @dev 
+     * - 일일 vesting 양 = 토큰풀 / 총 vesting 일수
+     * - 박스1개의 리워드 (rewardPerBox[d]) = 일일 vesting 양 * (구매수량(1) / 전체 판매수량(cumBoxes[d]))
+     * - cumBoxes[d] = cumBoxes[d-1] + boxesAddedPerDay[d]
+     * - cumRewardPerBox[d] = cumRewardPerBox[d-1] + rewardPerBox[d]
+     * - day (m) 에 구매한 박스의 day (n) 차 리워드 = cumRewardPerBox[n] - cumRewardPerBox[m]
      */
     mapping(uint256 => uint256) public boxesAddedPerDay; // d → d일에 추가된 박스 수
     mapping(uint256 => uint256) public referralsAddedPerDay; // d → d일에 추가된 '레퍼럴'이 붙은 박스 수
@@ -97,37 +105,39 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     mapping(uint256 => uint256) public cumRewardPerRefUnit; // d → 0..d일까지 '레퍼럴' 1단위당 누적 보상 합
 
     /**
-     * @notice user 정보 관리
-     * @dev 유저 별 레퍼럴코드, 박스보유량 히스토리, 레퍼럴 추천양 히스토리 관리
+     * @notice 사용자 정보 관리 - 레퍼럴 코드, 보유량 히스토리, 클레임 상태
+     * @dev 
+     * - 유저별 레퍼럴코드, 박스보유량 히스토리, 레퍼럴 추천량 히스토리 관리
+     * - 체크포인트 기반으로 시간별 보유량 변화 추적
+     * - 클레임 상태는 각 풀별로 독립적으로 관리
      */
-    mapping(address => bytes8) public referralCodeOf; // 주소 → 코드(8자)
-    mapping(bytes8 => address) public codeToOwner; // 코드 → 주소
-    mapping(address => BoxAmountCheckpoint[]) public buyerBoxAmountHistory; // 유저별 박스 보유량 체크포인트
-    mapping(address => BoxAmountCheckpoint[]) public referralAmountHistory; // 유저별 레퍼럴 단위 보유량 체크포인트
-    mapping(address => uint256) public lastBuyerClaimedDay; // 유저가 purchase pool에서 마지막으로 claim한 day index
-    mapping(address => uint256) public lastRefClaimedDay; // 유저가 referral pool에서 마지막으로 claim한 day index
-    mapping(address => uint256) public buybackUSDT; // 즉시 청구 가능한 USDT 바이백 잔액
+    mapping(address => bytes8) public referralCodeOf; // 주소 → 8자리 레퍼럴 코드
+    mapping(bytes8 => address) public codeToOwner; // 8자리 코드 → 소유자 주소
+    mapping(address => BoxAmountCheckpoint[]) public buyerBoxAmountHistory; // 유저별 박스 보유량 체크포인트 히스토리
+    mapping(address => BoxAmountCheckpoint[]) public referralAmountHistory; // 유저별 레퍼럴 단위 보유량 체크포인트 히스토리
+    mapping(address => uint256) public lastBuyerClaimedDay; // 유저가 purchase pool에서 마지막으로 claim한 day 인덱스
+    mapping(address => uint256) public lastRefClaimedDay; // 유저가 referral pool에서 마지막으로 claim한 day 인덱스
+    mapping(address => uint256) public buybackUSDT; // 즉시 청구 가능한 USDT 바이백 잔액 (10% 수수료)
 
-    // def. event
+    /// def. event
     /** 
-     * @notice 일별 정산(sync) 완료 이벤트
-     * @dev
-     * - day = (dayStartTs - vestingStartDate) / SECONDS_PER_DAY (0-베이스)
-     * - 당일 추가분은 분모에 포함되지 않음(항상 전일까지의 누적치 기준).
-     * - 보통 d==0에서는 분모가 0이므로 rewardPerBox/rewardPerRefUnit은 0.
-     * - 단위:
-     *   - rewardPerBox, rewardPerRefUnit: 18 decimals
-     *   - boxesDenom, referralDenom: 개수(정수)
-     * - sync() 루프 내에서 d일 확정 직후에 emit됨.
-     *
-     * rewardPerBox = dailyBuyerPool(d) / boxesDenom
-     * rewardPerRefUnit = dailyRefPool(d) / referralDenom
-     *
+     * @notice 일별 정산(sync) 완료 이벤트 - 베스팅 보상 확정
      * @param day 베스팅 시작일 기준 0-베이스 일 인덱스(이 날이 확정됨)
      * @param rewardPerBox Purchase 풀의 '박스 1개당' 일일 보상 단가(18dec)
      * @param rewardPerRefUnit Referral 풀의 '추천 단위 1개당' 일일 보상 단가(18dec)
      * @param boxesDenom 분모로 사용된 박스 수(전일까지 누적)
      * @param referralDenom 분모로 사용된 레퍼럴 수(전일까지 누적)
+     * @dev
+     * - day = (dayStartTs - vestingStartDate) / SECONDS_PER_DAY (0-베이스)
+     * - 당일 추가분은 분모에 포함되지 않음(항상 전일까지의 누적치 기준)
+     * - 보통 d==0에서는 분모가 0이므로 rewardPerBox/rewardPerRefUnit은 0
+     * - 단위:
+     *   - rewardPerBox, rewardPerRefUnit: 18 decimals
+     *   - boxesDenom, referralDenom: 개수(정수)
+     * - sync() 루프 내에서 d일 확정 직후에 emit됨
+     *
+     * rewardPerBox = dailyBuyerPool(d) / boxesDenom
+     * rewardPerRefUnit = dailyRefPool(d) / referralDenom
      */
     event DailySynced(
         uint256 indexed day, 
@@ -138,9 +148,10 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     );
 
     /**
-     * @notice 유저에게 레퍼럴코드 부여 이벤트
-     * @param user 유저 주소
-     * @param code 레퍼럴코드
+     * @notice 유저에게 레퍼럴코드 부여 이벤트 - 자동 코드 생성
+     * @param user 레퍼럴 코드가 할당된 유저 주소
+     * @param code 할당된 8자리 레퍼럴 코드 (대문자 영문/숫자 조합)
+     * @dev 신규 사용자 구매 시 자동으로 8자리 레퍼럴 코드가 생성되어 할당됨
      */
     event ReferralCodeAssigned(
         address indexed user,
@@ -148,19 +159,19 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     );
 
     /**
-     * @notice 박스 구매 이벤트
+     * @notice 박스 구매 이벤트 - 구매 완료 및 레퍼럴 처리
+     * @param buyer 구매자 주소
+     * @param boxCount 구매할 박스수량
+     * @param referrer 추천인 주소 (0x0이면 레퍼럴 없음)
+     * @param paidAmount 구매에 사용된 스테이블코인 금액(최소 단위)
+     * @param buyback 추천인 적립 바이백 금액 (10%)
+     * @param refCode 추천 코드(bytes8, 대문자 영문/숫자 8자, 정규화된 값)
      * @dev
      * - buyBox 성공 시 emit (adminBackfillPurchaseAt도 동일 이벤트 emit)
      * - 당일 구매분은 다음 날부터 보상에 반영됨(effDay = dToday + 1)
      * - paidAmount / buyback 단위: stableCoin의 최소 단위(예: USDT 6dec)
-     * - 자기추천 불가
-     *
-     * @param buyer 구매자 주소
-     * @param boxCount 구매할 박스수량
-     * @param referrer 추천인 주소
-     * @param paidAmount 구매에 사용된 스테이블코인 금액(최소 단위)
-     * @param buyback 추천인 적립 바이백 금액 (10%)
-     * @param refCode 추천 코드(bytes8, 대문자 영문/숫자 8자, 정규화된 값)
+     * - 자기추천 불가 (referrer != buyer 검증)
+     * - 레퍼럴 코드는 정규화된 8자리 bytes8 형태로 저장
      */
     event BoxesPurchased(
         address indexed buyer,
@@ -172,18 +183,18 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     );
 
     /**
-     * @notice 구매자 풀 기준 보상 클레임 완료 이벤트
+     * @notice 구매자 풀 기준 보상 클레임 완료 이벤트 - 베스팅 토큰 지급
+     * @param user 클레임한 사용자 주소
+     * @param amount 최종 지급액(vestingToken 단위; 18→6 자리 절삭 적용)
+     * @param fromDay 청구 구간 시작 일 인덱스(포함)
+     * @param toDay 청구 구간 종료 일 인덱스(포함; 일반적으로 lastSyncedDay-1)
      * @dev
-     * - fromDay~toDay(둘 다 포함) 구간에 대해 확정된 보상만 지급됨.
-     * - amount는 **항상** 18→6 자리 절삭 적용 후의 최종 지급액(vestingToken 단위).
+     * - fromDay~toDay(둘 다 포함) 구간에 대해 확정된 보상만 지급됨
+     * - amount는 **항상** 18→6 자리 절삭 적용 후의 최종 지급액(vestingToken 단위)
      * - 내부 로직: amount = _calcByHistory(...) → pay = _applyFloor6(amount) → transfer(pay)
-     *
-     * @param user    클레임한 사용자 주소
-     * @param amount  최종 지급액(vestingToken 단위; 18→6 자리 절삭 적용)
-     * @param fromDay 청구 구간 시작 일 인덱스(포함)
-     * @param toDay   청구 구간 종료 일 인덱스(포함; 일반적으로 lastSyncedDay-1)
+     * - 체크포인트 기반으로 정확한 보유량에 따른 보상 계산
      */
-    event BuyerClaimed(
+    event PurchasePoolClaimed(
         address indexed user, 
         uint256 amount, 
         uint256 fromDay, 
@@ -191,17 +202,18 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     );
 
     /**
-     * @notice 추천인(Referral) 풀 기준 보상 클레임 완료 이벤트
-     * @dev
-     * - fromDay~toDay(둘 다 포함) 구간의 확정분만 지급.
-     * - amount는 **항상** 18→6 자리 절삭 적용 후의 최종 지급액(vestingToken 단위).
-     *
-     * @param user    클레임한 추천인 주소
-     * @param amount  최종 지급액(vestingToken 단위; 18→6 자리 절삭 적용)
+     * @notice 추천인(Referral) 풀 기준 보상 클레임 완료 이벤트 - 레퍼럴 보상 지급
+     * @param user 클레임한 추천인 주소
+     * @param amount 최종 지급액(vestingToken 단위; 18→6 자리 절삭 적용)
      * @param fromDay 청구 구간 시작 일 인덱스(포함)
-     * @param toDay   청구 구간 종료 일 인덱스(포함; 일반적으로 lastSyncedDay-1)
+     * @param toDay 청구 구간 종료 일 인덱스(포함; 일반적으로 lastSyncedDay-1)
+     * @dev
+     * - fromDay~toDay(둘 다 포함) 구간의 확정분만 지급
+     * - amount는 **항상** 18→6 자리 절삭 적용 후의 최종 지급액(vestingToken 단위)
+     * - 추천인은 자신이 추천한 박스 수량에 비례하여 보상 받음
+     * - 구매자 풀과 독립적으로 계산 및 지급
      */
-    event ReferrerClaimed(
+    event ReferralPoolClaimed(
         address indexed user, 
         uint256 amount, 
         uint256 fromDay, 
@@ -209,13 +221,14 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     );
 
     /**
-     * @notice 추천 바이백(USDT) 청구 완료 이벤트
-     * @dev
-     * - buybackUSDT[user]에 누적된 전액을 출금하고 0으로 초기화.
-     * - amount 단위는 stableCoin의 최소 단위(예: USDT 6dec).
-     *
-     * @param user   청구 사용자 주소
+     * @notice 추천 바이백(USDT) 청구 완료 이벤트 - 수수료 환급
+     * @param user 청구 사용자 주소
      * @param amount 지급된 USDT 금액(최소 단위)
+     * @dev
+     * - buybackUSDT[user]에 누적된 전액을 출금하고 0으로 초기화
+     * - amount 단위는 stableCoin의 최소 단위(예: USDT 6dec)
+     * - 추천인은 자신이 추천한 구매의 10%를 USDT로 즉시 수령 가능
+     * - 바이백은 구매 시점에 즉시 적립되고 언제든지 청구 가능
      */
     event BuybackClaimed(
         address indexed user, 
@@ -223,19 +236,24 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     );
 
     /**
-     * @notice 베스팅 지급 토큰 주소 설정 이벤트
+     * @notice 베스팅 지급 토큰 주소 설정 이벤트 - 토큰 설정
      * @dev
-     * - onlyOwner로 설정되며, 주소는 0이 될 수 없음.
-     * - 설정 이후의 클레임에 사용됨(과거 기록에는 영향 없음).
+     * - onlyOwner로 설정되며, 주소는 0이 될 수 없음
+     * - 설정 이후의 클레임에 사용됨(과거 기록에는 영향 없음)
+     * - 베스팅 토큰은 스케줄 초기화 후 언제든지 설정 가능
      *
      * @param token 설정된 vestingToken 주소(ERC20)
      */
     event VestingTokenSet(address token);
 
     /**
-     * @param _stableCoin 결제/바이백 스테이블코인 주소
+     * @notice TokenVesting 컨트랙트 생성자
+     * @param _stableCoin 결제/바이백 스테이블코인 주소 (예: USDT)
      * @param _start 베스팅 시작 자정(UTC) — 예: 2025-06-03 00:00:00
-     * @dev 스케줄(연차 경계/총량) 초기화는 반드시 별도 함수로 1회 수행해야 함.
+     * @dev 
+     * - 스케줄(연차 경계/총량) 초기화는 반드시 별도 함수로 1회 수행해야 함
+     * - 베스팅 시작 시각은 UTC 자정 기준으로 설정되어야 함
+     * - 생성 직후에는 스케줄이 초기화되지 않은 상태로 시작
      */
     constructor(address _stableCoin, uint256 _start) Ownable(msg.sender) {
         require(_stableCoin != address(0), "invalid USDT");
@@ -249,10 +267,14 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice 커스텀 스케줄을 1회 초기화(연차 경계/총량)
+     * @notice 커스텀 스케줄을 1회 초기화(연차 경계/총량) - 베스팅 설정
+     * @dev 
+     * - 이 함수는 컨트랙트 생성 후 반드시 1회만 호출되어야 함
+     * - 연차별로 구매자 풀과 추천인 풀의 총량을 별도로 설정 가능
+     * - 각 연차는 베스팅 시작일 이후의 시점이어야 하며, 엄격하게 증가해야 함
      * @param _poolEnds 연차별 종료시각(inclusive, epoch sec), strictly increasing & > start
-     * @param _buyerTotals 연차별 구매자 총량(18dec)
-     * @param _refTotals 연차별 추천인 총량(18dec)
+     * @param _buyerTotals 연차별 구매자 풀 총량(18dec) - 해당 연차 동안 지급될 총 베스팅 토큰
+     * @param _refTotals 연차별 추천인 풀 총량(18dec) - 해당 연차 동안 지급될 총 레퍼럴 보상
      */
     function initializeSchedule(
         uint256[] calldata _poolEnds,
@@ -278,6 +300,14 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         scheduleInitialized = true;
     }
 
+    /**
+     * @notice 베스팅 지급 토큰 주소 설정 - 토큰 설정
+     * @dev 
+     * - onlyOwner만 호출 가능
+     * - 베스팅 토큰은 스케줄 초기화 후 언제든지 설정 가능
+     * - 설정된 토큰은 이후의 모든 클레임에 사용됨
+     * @param _token 베스팅 지급용 ERC20 토큰 주소
+     */
     function setVestingToken(address _token) external onlyOwner {
         require(_token != address(0), "invalid token");
         vestingToken = IERC20(_token);
@@ -285,14 +315,107 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice 과거 구매를 한 건 추가(백필)한다
+     * @notice 관리자가 유저의 레퍼럴 코드를 직접 설정하는 함수 (기존 시스템 코드 이관용)
+     * @param user 레퍼럴 코드를 설정할 유저 주소
+     * @param codeStr 설정할 레퍼럴 코드 문자열 (8자리)
+     * @param overwrite 기존 코드가 있을 때 덮어쓸지 여부
+     * @dev 
+     * - onlyOwner만 호출 가능
+     * - 문자열 코드를 bytes8로 정규화하여 내부 함수 호출
+     * - 기존 시스템에서 사용하던 레퍼럴 코드를 새로운 시스템으로 이관할 때 사용
      */
-    function adminBackfillPurchaseAt(
+    function setReferralCode(
+        address user, 
+        string calldata codeStr, 
+        bool overwrite
+    ) external onlyOwner {
+        bytes8 code = _normalizeToBytes8(codeStr);
+        _setReferralCodeInternal(user, code, overwrite);
+    }
+
+    /**
+     * @notice 관리자가 여러 유저의 레퍼럴 코드를 일괄 설정하는 함수 (대량 이관용)
+     * @param users 레퍼럴 코드를 설정할 유저 주소 배열
+     * @param codes 설정할 레퍼럴 코드 문자열 배열 (각각 8자리)
+     * @param overwrite 기존 코드가 있을 때 덮어쓸지 여부
+     * @dev 
+     * - onlyOwner만 호출 가능
+     * - users와 codes 배열의 길이가 일치해야 함
+     * - 각 유저별로 개별적으로 내부 함수 호출하여 코드 설정
+     * - 기존 시스템에서 대량의 레퍼럴 코드를 한 번에 이관할 때 사용
+     */
+    function setReferralCodesBulk(
+        address[] calldata users, 
+        string[] calldata codes, 
+        bool overwrite
+    ) external onlyOwner {
+        require(users.length == codes.length, "len mismatch");
+        for (uint256 i = 0; i < users.length; i++) {
+            bytes8 code = _normalizeToBytes8(codes[i]);
+            _setReferralCodeInternal(users[i], code, overwrite);
+        }
+    }
+
+    /**
+     * @notice 레퍼럴 코드 설정의 내부 로직을 처리하는 함수
+     * @param user 레퍼럴 코드를 설정할 유저 주소
+     * @param code 설정할 레퍼럴 코드 (bytes8 형식)
+     * @param overwrite 기존 코드가 있을 때 덮어쓸지 여부
+     * @dev 
+     * - 내부 함수로 외부에서 직접 호출 불가
+     * - 유저 주소와 코드가 유효한지 검증
+     * - 코드 중복 할당 방지 (다른 유저가 이미 사용 중인 코드는 할당 불가)
+     * - overwrite가 true인 경우에만 기존 코드 덮어쓰기 가능
+     * - 코드 할당 시 양방향 매핑 업데이트 (user → code, code → user)
+     * - 코드 할당 완료 시 이벤트 발생
+     */
+    function _setReferralCodeInternal(
+        address user, 
+        bytes8 code, 
+        bool overwrite
+    ) internal {
+        require(user != address(0), "zero user");
+        require(code != bytes8(0), "zero code");
+
+        // 이 코드가 다른 주소에 이미 배정되어 있으면 불가
+        address ownerOfCode = codeToOwner[code];
+        require(ownerOfCode == address(0) || ownerOfCode == user, "code taken");
+
+        bytes8 old = referralCodeOf[user];
+        if (old != bytes8(0) && old != code) {
+            require(overwrite, "has code");
+            // 기존 코드 소유권 해제
+            codeToOwner[old] = address(0);
+        }
+
+        referralCodeOf[user] = code;
+        codeToOwner[code] = user;
+
+        emit ReferralCodeAssigned(user, code);
+    }
+
+    /**
+     * @notice 과거 구매를 한 건 추가(백필)한다 - 관리자 전용
+     * @param buyer 구매자 주소
+     * @param refCodeStr 추천인 레퍼럴 '문자열 코드'
+     * @param boxCount 구매한 박스 수량
+     * @param purchaseTs 구매 시점 타임스탬프
+     * @param paidUnits 결제된 USDT 금액 (최소 단위)
+     * @param creditBuyback 바이백을 적립할지 여부
+     * @dev 
+     * - onlyOwner만 호출 가능
+     * - 이미 확정된 날짜에는 백필 불가 (d >= lastSyncedDay)
+     * - 구매 시점의 타임스탬프를 기준으로 해당 일자에 배치
+     * - 레퍼럴이 있는 경우 바이백도 함께 처리
+     * - refCodeStr == ""  → 레퍼럴 없음으로 처리(address(0))
+     * - refCodeStr != "" → _referrerFromString으로 소유자 조회(없으면 revert "ref code not found")
+     */
+    function backfillPurchaseAt(
         address buyer,
-        address referrer,
+        string calldata refCodeStr,
         uint256 boxCount,
         uint256 purchaseTs,
-        uint256 usdtPaidUnits,
+        uint256 paidUnits,
         bool    creditBuyback
     ) external onlyOwner {
         require(scheduleInitialized, "no schedule");
@@ -304,7 +427,14 @@ contract TokenVesting is Ownable, ReentrancyGuard {
 
         require(d >= lastSyncedDay, "day finalized");
 
-        // 1) 스토리지 반영
+        // 0) 레퍼럴 문자열 → 주소/bytes8로 해석 (빈 문자열이면 없음)
+        address referrer = address(0);
+        bytes8  refCode  = bytes8(0);
+        if (bytes(refCodeStr).length != 0) {
+            (referrer, refCode) = _referrerFromString(refCodeStr); // 없으면 revert
+        }
+
+        // 1) 스토리지 반영 - 일별 데이터 업데이트
         boxesAddedPerDay[d] += boxCount;
         _pushBuyerCheckpoint(buyer, d + 1, boxCount);
 
@@ -313,27 +443,32 @@ contract TokenVesting is Ownable, ReentrancyGuard {
             referralsAddedPerDay[d] += boxCount;
             _pushRefCheckpoint(referrer, d + 1, boxCount);
 
-            if (creditBuyback && usdtPaidUnits > 0) {
-                buyback = (usdtPaidUnits * BUYBACK_PERCENT) / 100;
+            if (creditBuyback && paidUnits > 0) {
+                buyback = (paidUnits * BUYBACK_PERCENT) / 100;
                 buybackUSDT[referrer] += buyback;
             }
         }
 
-        // 2) 코드 보장(정규화된 코드 확보 후 이벤트에 넣음)
+        // 2) 코드 보장(존재 없으면 자동 생성) — 구매자/추천인 각각
         _ensureReferralCode(buyer);
-        if (referrer != address(0)) _ensureReferralCode(referrer);
+        if (referrer != address(0)) {
+            _ensureReferralCode(referrer);
+        }
 
-        bytes8 refCode = (referrer != address(0)) ? referralCodeOf[referrer] : bytes8(0);
-
-        // 3) 구매 이벤트 emit (스캐너 일원화)
-        emit BoxesPurchased(buyer, boxCount, referrer, usdtPaidUnits, buyback, refCode);
+        // 3) 구매 이벤트 emit (referrer 없으면 0, 코드도 0)
+        emit BoxesPurchased(buyer, boxCount, referrer, paidUnits, buyback, refCode);
     }
 
+
     /**
-     * @notice 박스 구매 (EIP-2612 permit은 선택)
+     * @notice 박스 구매 (EIP-2612 permit은 선택) - 사용자 구매
+     * @param boxCount 구매할 박스 수량
+     * @param refCodeStr 8자리 레퍼럴 코드 문자열
+     * @param p EIP-2612 permit 데이터 (deadline이 0이면 스킵)
      * @dev
      * - p.deadline == 0 이면 permit 스킵 → 기존 approve 기반 결제
      * - p.deadline != 0 이면 permit 실행 후 결제
+     * - nonReentrant로 재진입 공격 방지
      */
     function buyBox(
         uint256 boxCount,
@@ -344,6 +479,18 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         _buy(boxCount, refCodeStr, usePermit, p);
     }
 
+    /**
+     * @notice 박스 구매 내부 로직 - 실제 구매 처리
+     * @param boxCount 구매할 박스 수량
+     * @param refCodeStr 8자리 레퍼럴 코드 문자열
+     * @param usePermit permit 사용 여부
+     * @param p EIP-2612 permit 데이터
+     * @dev 
+     * - 구매 전 sync() 호출로 보상 확정
+     * - 자기추천 방지 (referrer != msg.sender)
+     * - 구매 당일은 다음 날부터 보상에 반영 (effDay = dToday + 1)
+     * - 레퍼럴이 있는 경우 바이백 10% 적립
+     */
     function _buy(uint256 boxCount, string calldata refCodeStr, bool usePermit, PermitData memory p) internal {
         require(scheduleInitialized, "no schedule");
         require(block.timestamp >= vestingStartDate, "not started");
@@ -378,6 +525,14 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         emit BoxesPurchased(msg.sender, boxCount, referrer, cost, buyback, normCode);
     }
 
+    /**
+     * @notice 베스팅 보상 동기화 - 자정 기준 일별 보상 확정
+     * @dev 
+     * - nextSyncTs부터 현재까지의 모든 완전한 하루를 처리
+     * - 각 하루마다 구매자 풀과 추천인 풀의 보상을 계산하고 확정
+     * - 누적 데이터(cumBoxes, cumRewardPerBox 등) 업데이트
+     * - 누구나 호출 가능하지만 가스비 발생
+     */
     function sync() public {
         require(scheduleInitialized, "no schedule");
         uint256 nowTs = block.timestamp;
@@ -386,6 +541,14 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         }
     }
 
+    /**
+     * @notice 베스팅 보상 동기화 (제한된 일수) - 관리자 전용
+     * @param limitDays 한 번에 처리할 최대 일수
+     * @dev 
+     * - onlyOwner만 호출 가능
+     * - 가스 한도 문제로 인한 sync 실패를 방지하기 위한 제한 동기화
+     * - limitDays만큼만 처리하여 가스 소모 제한
+     */
     function syncLimitDay(uint256 limitDays) external onlyOwner {
         require(scheduleInitialized, "no schedule");
         require(limitDays > 0, "limit=0");
@@ -401,16 +564,27 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         require(processed > 0, "nothing to sync");
     }
 
+    /**
+     * @notice 하루치 베스팅 보상 확정 - 내부 동기화 로직
+     * @notice 이 함수는 sync() 내부에서 호출되어 자동으로 처리됨
+     * @dev 
+     * - 특정 하루의 구매자 풀과 추천인 풀 보상을 계산하고 확정
+     * - 분모는 전일까지의 누적 보유량 (당일 추가분은 다음 날부터 반영)
+     * - prefix-sum 방식으로 누적 보상 계산
+     * - 일별 데이터와 누적 데이터 모두 업데이트
+     */
     function _syncOneDay() internal {
         uint256 dayStart = nextSyncTs;
         uint256 d = (dayStart - vestingStartDate) / SECONDS_PER_DAY;
 
+        // 전일까지의 누적 보유량을 분모로 사용 (당일 추가분은 제외)
         uint256 boxesDenom    = d == 0 ? 0 : cumBoxes[d - 1];
         uint256 referralDenom = d == 0 ? 0 : cumReferals[d - 1];
 
         uint256 perBox = 0;
         uint256 perRef = 0;
 
+        // 구매자 풀과 추천인 풀의 일일 보상 계산
         uint256 buyerPool = _dailyPoolRawByTs(dayStart, true);
         if (buyerPool > 0 && boxesDenom > 0) {
             perBox = buyerPool / boxesDenom;
@@ -421,11 +595,13 @@ contract TokenVesting is Ownable, ReentrancyGuard {
             perRef = refPool / referralDenom;
         }
 
+        // 일별 보상과 누적 보상 업데이트
         rewardPerBox[d]        = perBox;
         rewardPerReferal[d]    = perRef;
         cumRewardPerBox[d]     = (d == 0 ? 0 : cumRewardPerBox[d - 1]) + perBox;
         cumRewardPerRefUnit[d] = (d == 0 ? 0 : cumRewardPerRefUnit[d - 1]) + perRef;
 
+        // 누적 보유량 업데이트
         uint256 prevBoxes = d == 0 ? 0 : cumBoxes[d - 1];
         uint256 prevRefs  = d == 0 ? 0 : cumReferals[d - 1];
         cumBoxes[d]       = prevBoxes + boxesAddedPerDay[d];
@@ -433,11 +609,21 @@ contract TokenVesting is Ownable, ReentrancyGuard {
 
         emit DailySynced(d, perBox, perRef, boxesDenom, referralDenom);
 
+        // 다음 동기화 시점과 확정된 일수 업데이트
         nextSyncTs += SECONDS_PER_DAY;
         lastSyncedDay = d + 1;
     }
 
-    function claimBuyerReward() external nonReentrant {
+    /**
+     * @notice 구매자 풀 보상 클레임 - 베스팅 토큰 수령
+     * @notice 구매한 박스 수량에 비례하여 베스팅 토큰을 수령
+     * @dev 
+     * - nonReentrant로 재진입 공격 방지
+     * - 클레임 전 sync() 호출로 최신 보상 확정
+     * - 체크포인트 기반으로 정확한 보유량에 따른 보상 계산
+     * - 18→6 자리 절삭 적용 후 최종 지급
+     */
+    function claimPurchaseReward() external nonReentrant {
         require(address(vestingToken) != address(0), "token not set");
         require(scheduleInitialized, "no schedule");
         sync();
@@ -453,10 +639,18 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         uint256 pay = _applyFloor6(amount);
         require(vestingToken.transfer(msg.sender, pay), "xfer failed");
 
-        emit BuyerClaimed(msg.sender, pay, fromDay, toDay);
+        emit PurchasePoolClaimed(msg.sender, pay, fromDay, toDay);
     }
 
-    function claimReferrerReward() external nonReentrant {
+    /**
+     * @notice 추천인 풀 보상 클레임 - 레퍼럴 보상 수령
+     * @dev 
+     * - nonReentrant로 재진입 공격 방지
+     * - 클레임 전 sync() 호출로 최신 보상 확정
+     * - 체크포인트 기반으로 정확한 추천량에 따른 보상 계산
+     * - 18→6 자리 절삭 적용 후 최종 지급
+     */
+    function claimReferralReward() external nonReentrant {
         require(address(vestingToken) != address(0), "token not set");
         require(scheduleInitialized, "no schedule");
         sync();
@@ -472,9 +666,16 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         uint256 pay = _applyFloor6(amount);
         require(vestingToken.transfer(msg.sender, pay), "xfer failed");
 
-        emit ReferrerClaimed(msg.sender, pay, fromDay, toDay);
+        emit ReferralPoolClaimed(msg.sender, pay, fromDay, toDay);
     }
 
+    /**
+     * @notice 추천 바이백(USDT) 청구 - 수수료 환급
+     * @dev 
+     * - nonReentrant로 재진입 공격 방지
+     * - 누적된 바이백 전액을 출금하고 0으로 초기화
+     * - USDT를 사용자에게 직접 전송
+     */
     function claimBuyback() external nonReentrant {
         uint256 amt = buybackUSDT[msg.sender];
         require(amt > 0, "nothing");
@@ -483,67 +684,86 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         emit BuybackClaimed(msg.sender, amt);
     }
 
-
-
-
-    function getBuyerClaimableReward(address user) external view returns (uint256) {
-        (uint256 fromDay, uint256 toDay) = _claimWindow(lastBuyerClaimedDay[user]);
-        if (fromDay > toDay) return 0;
-        return _calcByHistory(buyerBoxAmountHistory[user], cumRewardPerBox, fromDay, toDay);
-    }
-
-    function getReferrerClaimableReward(address user) external view returns (uint256) {
-        (uint256 fromDay, uint256 toDay) = _claimWindow(lastRefClaimedDay[user]);
-        if (fromDay > toDay) return 0;
-        return _calcByHistory(referralAmountHistory[user], cumRewardPerRefUnit, fromDay, toDay);
-    }
-
-    function getBuybackBalance(address user) external view returns (uint256) {
-        return buybackUSDT[user];
-    }
-
+    /**
+     * @notice 사용자의 레퍼럴 코드를 문자열로 조회
+     * @param user 레퍼럴 코드를 조회할 사용자 주소
+     * @return 8자리 레퍼럴 코드 문자열 (예: "ABCD1234")
+     * @dev bytes8 형태의 레퍼럴 코드를 읽기 쉬운 문자열로 변환
+     */
     function myReferralCodeString(address user) external view returns (string memory) {
         bytes8 code = referralCodeOf[user];
         require(code != bytes8(0), "no code");
         return _bytes8ToString(code);
     }
 
+    /**
+     * @notice 레퍼럴 코드 문자열로 소유자 주소 조회
+     * @param refCodeStr 8자리 레퍼럴 코드 문자열
+     * @return 해당 코드의 소유자 주소
+     * @dev 문자열 형태의 레퍼럴 코드를 정규화하여 소유자 주소 반환
+     */
     function ownerByReferralString(string calldata refCodeStr) external view returns (address) {
         (address referrer, ) = _referrerFromString(refCodeStr);
         return referrer;
     }
 
-    // ---------------------------
-    // NEW: View preview (pending days simulated)
-    // ---------------------------
-
+    /**
+     * @notice 현재 시점 기준 구매자 클레임 가능한 보상 미리보기
+     * @param user 보상을 조회할 사용자 주소
+     * @return 클레임 가능한 총 보상량 (18 decimals)
+     * @dev 현재 블록 타임스탬프를 기준으로 시뮬레이션
+     */
     function previewBuyerClaimable(address user) external view returns (uint256) {
         return _previewBuyerClaimableAtTs(user, block.timestamp);
     }
 
+    /**
+     * @notice 현재 시점 기준 추천인 클레임 가능한 보상 미리보기
+     * @param user 보상을 조회할 추천인 주소
+     * @return 클레임 가능한 총 보상량 (18 decimals)
+     * @dev 현재 블록 타임스탬프를 기준으로 시뮬레이션
+     */
     function previewReferrerClaimable(address user) external view returns (uint256) {
         return _previewReferrerClaimableAtTs(user, block.timestamp);
     }
 
+    /**
+     * @notice 특정 시점 기준 구매자 클레임 가능한 보상 미리보기
+     * @param user 보상을 조회할 사용자 주소
+     * @param ts 기준 시각 (Unix timestamp)
+     * @return 클레임 가능한 총 보상량 (18 decimals)
+     * @dev 지정된 타임스탬프까지의 보상을 시뮬레이션
+     */
     function previewBuyerClaimableAt(address user, uint256 ts) external view returns (uint256) {
         return _previewBuyerClaimableAtTs(user, ts);
     }
 
+    /**
+     * @notice 특정 시점 기준 추천인 클레임 가능한 보상 미리보기
+     * @param user 보상을 조회할 추천인 주소
+     * @param ts 기준 시각 (Unix timestamp)
+     * @return 클레임 가능한 총 보상량 (18 decimals)
+     * @dev 지정된 타임스탬프까지의 보상을 시뮬레이션
+     */
     function previewReferrerClaimableAt(address user, uint256 ts) external view returns (uint256) {
         return _previewReferrerClaimableAtTs(user, ts);
     }
 
-
-
-    // ---------------------------
-    // Midnight tick helpers (dynamic)
-    // ---------------------------
-
+    /**
+     * @notice 특정 연차의 시작 시각 계산
+     * @param y 연차 인덱스 (0부터 시작)
+     * @return 해당 연차의 시작 시각 (Unix timestamp)
+     */
     function _yearStartTs(uint256 y) internal view returns (uint256) {
         if (y == 0) return vestingStartDate;
         return poolEndTimes[y - 1] + 1; // inclusive end 다음 초가 다음 연차 시작
     }
 
+    /**
+     * @notice 특정 연차의 종료 시각 조회
+     * @param y 연차 인덱스 (0부터 시작)
+     * @return 해당 연차의 종료 시각 (inclusive, Unix timestamp)
+     */
     function _yearEndTs(uint256 y) internal view returns (uint256) {
         return poolEndTimes[y]; // inclusive
     }
@@ -566,6 +786,13 @@ contract TokenVesting is Ownable, ReentrancyGuard {
 
     /**
      * @notice 자정 시각 기준 일일 풀 계산(마지막 날 보정 포함) — 연차별 실제 일수(termDays) 기반
+     * @param dayStartTs 기준 시각 (Unix timestamp)
+     * @param forBuyer true면 구매자 풀, false면 추천인 풀 계산
+     * @return 해당 날짜의 일일 풀 크기 (18 decimals)
+     * @dev 
+     * - 연차별 총량을 해당 연차의 실제 일수로 나누어 일일 풀 계산
+     * - 마지막 날에는 잔여 보정을 통해 정확한 총량 분배
+     * - 구매자 풀과 추천인 풀을 구분하여 계산
      */
     function _dailyPoolRawByTs(uint256 dayStartTs, bool forBuyer) internal view returns (uint256) {
         if (!scheduleInitialized) return 0;
@@ -587,12 +814,15 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         return base;
     }
 
-    
-
-    // ---------------------------
-    // Referral helpers
-    // ---------------------------
-
+    /**
+     * @notice string 변수를 bytes8로 변환한다.
+     * @param s bytes8로 변환할 string 변수
+     * @return out 변환된 bytes8값
+     * @dev 대문자로 정규화작업 후, A-Z/0-9만 허용한다.
+     * ex.
+     *     s = "ABCDEFGH" -> bytes8(0x4142434445464748)
+     *     s = "01234567" -> bytes8(0x3031323334353637)
+     */
     function _normalizeToBytes8(string memory s) internal pure returns (bytes8 out) {
         bytes memory b = bytes(s);
         require(b.length == 8, "ref len!=8");
@@ -608,27 +838,49 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         return bytes8(acc);
     }
 
+    /**
+     * @notice bytes8 변수를 string으로 변환한다.
+     * @param code string으로 변환할 bytes8 변수
+     * @return 변환된 string값
+     * @dev 레퍼럴 (8자리 bytes)을 string으로 변환하기 위한 함수이다.
+     * ex.
+     *     code = bytes8(0x4142434445464748) → "ABCDEFGH"
+     *     code = bytes8(0x3031323334353637) → "01234567"
+    */
     function _bytes8ToString(bytes8 code) internal pure returns (string memory) {
         bytes memory out = new bytes(8);
         uint64 v = uint64(code);
+        // bytes8의 각 byte를 masking하여 out 버퍼에 담음
         for (uint256 i = 0; i < 8; i++) {
             out[7 - i] = bytes1(uint8(v & 0xFF));
             v >>= 8;
         }
+        // out 버퍼를 string으로 형변환 (bytes와 string은 메모리 구조가 같음 => typecasting만으로 변환 가능)
         return string(out);
     }
 
+    /**
+     * @notice 사용자에게 고유한 레퍼럴 코드 할당 - 자동 코드 생성
+     * @param user 레퍼럴 코드를 할당할 사용자 주소
+     * @return code 할당된 8자리 레퍼럴 코드
+     * @dev 
+     * - 이미 할당된 코드가 있으면 기존 코드 반환
+     * - 없으면 keccak256 해시 기반으로 고유한 8자리 코드 생성
+     * - A-Z, 0-9 문자만 사용하여 읽기 쉬운 코드 생성
+     * - 충돌 방지를 위해 salt를 증가시키며 반복
+     */
     function _ensureReferralCode(address user) internal returns (bytes8 code) {
         code = referralCodeOf[user];
-        if (code != bytes8(0)) return code;
-
+        if (code != bytes8(0)) {
+            return code; // 이미 할당된 코드가 있으면 기존 코드 반환
+        }
         uint256 salt = 0;
         while (true) {
             bytes8 raw = bytes8(keccak256(abi.encodePacked(user, salt)));
             bytes memory buf = new bytes(8);
             for (uint256 i = 0; i < 8; i++) {
                 uint8 x = uint8(uint64(uint64(bytes8(raw)) >> (i * 8)));
-                uint8 m = x % 36;
+                uint8 m = x % 36; // A-Z,0-9 총 36개
                 buf[7 - i] = bytes1(m < 26 ? (65 + m) : (48 + (m - 26)));
             }
             uint64 acc = 0;
@@ -642,33 +894,60 @@ contract TokenVesting is Ownable, ReentrancyGuard {
                 emit ReferralCodeAssigned(user, cand);
                 return cand;
             }
-            unchecked { ++salt; }
+            unchecked {
+                ++salt;
+            }
         }
     }
 
+    /**
+     * @notice 레퍼럴 코드 문자열로 추천인 주소와 정규화된 코드 조회
+     * @param refCodeStr 8자리 레퍼럴 코드 문자열
+     * @return referrer 해당 코드의 소유자 주소
+     * @return code 정규화된 bytes8 형태의 레퍼럴 코드
+     * @dev 
+     * - 입력된 문자열을 bytes8로 정규화 (대문자 변환, 유효성 검증)
+     * - 정규화된 코드로 소유자 주소 조회
+     * - 코드가 존재하지 않으면 revert
+     */
     function _referrerFromString(string calldata refCodeStr) internal view returns (address referrer, bytes8 code) {
         code = _normalizeToBytes8(refCodeStr);
         referrer = codeToOwner[code];
-        require(referrer != address(0), "ref code not found");
+        require(referrer != address(0), "refferal code not found");
     }
 
-    
-
-    // ---------------------------
-    // Checkpoint helpers
-    // ---------------------------
-
+    /**
+     * @notice 구매자 박스 보유량 체크포인트 추가 - 히스토리 관리
+     * @param user 체크포인트를 추가할 사용자 주소
+     * @param effDay 체크포인트가 효력을 발휘하는 날 (구매일 + 1)
+     * @param added 새로 추가된 박스 수량
+     * @dev 
+     * - 사용자별 박스 보유량 변화를 시간순으로 추적
+     * - 새로운 체크포인트는 이전 누적량 + 추가량으로 계산
+     * - 첫 번째 체크포인트인 경우 lastBuyerClaimedDay를 UNSET으로 초기화
+     */
     function _pushBuyerCheckpoint(address user, uint256 effDay, uint256 added) internal {
         BoxAmountCheckpoint[] storage hist = buyerBoxAmountHistory[user];
         uint256 newBal = added;
-        if (hist.length > 0) newBal += hist[hist.length - 1].amount;
-
-        if (hist.length == 0 && lastBuyerClaimedDay[user] == 0) {
+        if(hist.length > 0) {
+            newBal += hist[hist.length - 1].amount;
+        }
+        if(hist.length == 0 && lastBuyerClaimedDay[user] == 0) {
             lastBuyerClaimedDay[user] = UNSET;
         }
         hist.push(BoxAmountCheckpoint({ day: effDay, amount: newBal }));
     }
 
+    /**
+     * @notice 추천인 레퍼럴 단위 보유량 체크포인트 추가 - 히스토리 관리
+     * @param user 체크포인트를 추가할 추천인 주소
+     * @param effDay 체크포인트가 효력을 발휘하는 날 (구매일 + 1)
+     * @param added 새로 추가된 레퍼럴 단위 수량
+     * @dev 
+     * - 사용자별 레퍼럴 단위 보유량 변화를 시간순으로 추적
+     * - 새로운 체크포인트는 이전 누적량 + 추가량으로 계산
+     * - 첫 번째 체크포인트인 경우 lastRefClaimedDay를 UNSET으로 초기화
+     */
     function _pushRefCheckpoint(address user, uint256 effDay, uint256 added) internal {
         BoxAmountCheckpoint[] storage hist = referralAmountHistory[user];
         uint256 newBal = added;
@@ -680,8 +959,16 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         hist.push(BoxAmountCheckpoint({ day: effDay, amount: newBal }));
     }
 
-    
-
+    /**
+     * @notice 특정 시점 기준 구매자 클레임 가능한 보상 미리보기 - 내부 계산
+     * @param user 보상을 조회할 사용자 주소
+     * @param ts 기준 시각 (Unix timestamp)
+     * @return total 클레임 가능한 총 보상량 (18 decimals)
+     * @dev 
+     * - 확정된 보상과 미확정 보상을 모두 계산하여 총 클레임 가능량 반환
+     * - 확정된 보상: _calcByHistory로 체크포인트 기반 계산
+     * - 미확정 보상: _previewBuyerPendingAt으로 시뮬레이션
+     */
     function _previewBuyerClaimableAtTs(address user, uint256 ts) internal view returns (uint256) {
         (uint256 fromDay0, uint256 toDay0) = _claimWindow(lastBuyerClaimedDay[user]);
         (uint256 previewLast,) = _previewLastFinalAt(ts);
@@ -697,6 +984,16 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         return total;
     }
 
+    /**
+     * @notice 특정 시점 기준 추천인 클레임 가능한 보상 미리보기 - 내부 계산
+     * @param user 보상을 조회할 추천인 주소
+     * @param ts 기준 시각 (Unix timestamp)
+     * @return total 클레임 가능한 총 보상량 (18 decimals)
+     * @dev 
+     * - 확정된 보상과 미확정 보상을 모두 계산하여 총 클레임 가능량 반환
+     * - 확정된 보상: _calcByHistory로 체크포인트 기반 계산
+     * - 미확정 보상: _previewRefPendingAt으로 시뮬레이션
+     */
     function _previewReferrerClaimableAtTs(address user, uint256 ts) internal view returns (uint256) {
         (uint256 fromDay0, uint256 toDay0) = _claimWindow(lastRefClaimedDay[user]);
         (uint256 previewLast,) = _previewLastFinalAt(ts);
@@ -712,6 +1009,13 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         return total;
     }
 
+    /**
+     * @notice ts 시점에 sync()를 가정한 “예상 확정 범위”를 계산한다.
+     * @dev lastSyncedDay(d)와 nextSyncTs를 기준으로, ts까지 경과한 ‘완전한 하루(UTC 00:00 경계)’를 deltaDays로 산출함.
+     * @param ts 기준 시각(Unix epoch sec)
+     * @return previewLastFinal 가상 마지막 확정 일(day) 인덱스
+     * @return dNext 가상 lastSyncedDay(확정된 총 일수)
+     */
     function _previewLastFinalAt(uint256 ts) internal view returns (uint256 previewLastFinal, uint256 dNext) {
         uint256 tmpNext = nextSyncTs;
         uint256 d = lastSyncedDay;
@@ -723,32 +1027,104 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         dNext = d;
     }
 
-    function _previewBuyerPendingAt(address user, uint256 startSim, uint256 endSim) internal view returns (uint256 total) {
+    /**
+     * @notice startSim ~ endSim까지의 purchasePool에 대한 유저가 받을 vesting양을 계산한다.
+     * @param user 보상을 계산할 사용자 주소
+     * @param startSim 시뮬레이션 시작 일 인덱스 (포함)
+     * @param endSim 시뮬레이션 종료 일 인덱스 (포함)
+     * @return total 해당 구간의 총 예상 보상량 (18 decimals)
+     * @dev
+     * - day d의 유저 하루치 = (pool_d) / (denom_{d-1}) * (curBal_d)
+     *      pool_d: 그 날의 구매 풀 일일량
+     *      denom_{d-1}: 전일까지 누적 박스 수
+     *      curBal_d: 해당 일에 유효한 유저 박스 수
+     * - 분모 denom은 항상 "전일까지의 누적"을 사용합니다.
+     * - 유저 박스 잔액(curBal)은 체크포인트의 effDay(= 구매일+1) 기준으로 d일에 유효한 값으로 갱신합니다.
+     * - 결과값은 18 decimals 기준 누적 예상치입니다. (실지급 시에는 _applyFloor6로 6자리 절삭)
+     */
+    function _previewBuyerPendingAt(
+        address user,
+        uint256 startSim,
+        uint256 endSim
+    ) internal view returns (uint256 total) {
+        // ── 1) 유저의 박스 보유량 체크포인트 로딩
         BoxAmountCheckpoint[] storage hist = buyerBoxAmountHistory[user];
         uint256 n = hist.length;
 
-        uint256 i = 0; uint256 curBal = 0;
-        while (i < n && hist[i].day <= startSim) { curBal = hist[i].amount; unchecked { i++; } }
+        // startSim 시점(포함)에 유효한 유저 박스 잔액(curBal)으로 맞추기 위한 준비
+        uint256 i = 0;
+        uint256 curBal = 0;
 
+        // hist[i].day <= startSim 인 마지막 체크포인트를 찾아 curBal에 반영
+        // (체크포인트 day는 effDay: 해당 day부터 효력이 생김)
+        while (i < n && hist[i].day <= startSim) {
+            curBal = hist[i].amount;
+            unchecked {
+                i++;
+            }
+        }
+
+        // ── 2) 분모(전일까지 누적 박스 수) 초기화
+        // 마지막으로 확정된 날이 (lastSyncedDay - 1)이므로 그 시점의 누적(cumBoxes[lastSyncedDay - 1])에서 시작
         uint256 prevBoxes = (lastSyncedDay == 0) ? 0 : cumBoxes[lastSyncedDay - 1];
+
+        // lastSyncedDay..(startSim-1) 사이에 확정은 안 되었지만 기록된 판매량을 가상 누적치에 더해,
+        // startSim의 "전일 누적"을 prevBoxes로 맞춰둔다.
         if (startSim > lastSyncedDay) {
             for (uint256 dd = lastSyncedDay; dd < startSim; dd++) {
                 prevBoxes += boxesAddedPerDay[dd];
             }
         }
 
+        // ── 3) 일 단위 시뮬레이션 루프: startSim..endSim (둘 다 포함)
         for (uint256 d = startSim; d <= endSim; d++) {
-            while (i < n && hist[i].day <= d) { curBal = hist[i].amount; unchecked { i++; } }
-            uint256 denom = prevBoxes;
-            if (denom > 0 && curBal > 0) {
-                uint256 dayStartTs = vestingStartDate + d * SECONDS_PER_DAY;
-                uint256 pool = _dailyPoolRawByTs(dayStartTs, true);
-                if (pool > 0) total += curBal * (pool / denom);
+            // d일에 효력 시작하는 체크포인트가 있으면 유저 잔액(curBal) 갱신
+            while (i < n && hist[i].day <= d) {
+                curBal = hist[i].amount;
+                unchecked {
+                    i++;
+                }
             }
+
+            // 분모: 항상 "전일까지의 누적 박스 수"
+            uint256 denom = prevBoxes;
+
+            if (denom > 0 && curBal > 0) {
+                // 해당 날짜(day d)의 자정 타임스탬프
+                uint256 dayStartTs = vestingStartDate + d * SECONDS_PER_DAY;
+
+                // 그 날의 구매 풀 일일량(18dec). 마지막 날은 잔여 보정(_dailyPoolRawByTs 내부 로직)
+                uint256 pool = _dailyPoolRawByTs(dayStartTs, true);
+
+                if (pool > 0) {
+                    // 유저 하루치 = curBal * (pool / denom)
+                    // 현재 구현(곱→나눗셈 순서)에서는 나눗셈 내림에 따른 손실이 먼저 발생할 수 있음.
+                    total += curBal * (pool / denom);
+
+                    // [정밀도 개선 권장안]
+                    // OpenZeppelin Math.mulDiv를 사용하면 (curBal * pool) / denom 를 256-bit 정확도로 계산.
+                    // total += Math.mulDiv(curBal, pool, denom);
+                }
+            }
+
+            // 다음 날(d+1)을 위해 누적 박스 수를 갱신:
+            // "오늘(d) 추가된 판매량"을 전일까지 누적치(prevBoxes)에 더해 둔다.
             prevBoxes += boxesAddedPerDay[d];
         }
     }
 
+
+    /**
+     * @notice startSim ~ endSim까지의 referralPool에 대한 유저가 받을 vesting양을 계산한다.
+     * @param user 보상을 계산할 추천인 주소
+     * @param startSim 시뮬레이션 시작 일 인덱스 (포함)
+     * @param endSim 시뮬레이션 종료 일 인덱스 (포함)
+     * @return total 해당 구간의 총 예상 보상량 (18 decimals)
+     * @dev 
+     * - 구매자 풀과 동일한 로직으로 추천인 풀 보상 계산
+     * - 체크포인트 기반으로 정확한 추천량 변화 추적
+     * - 분모는 전일까지의 누적 추천량 사용
+     */
     function _previewRefPendingAt(address user, uint256 startSim, uint256 endSim) internal view returns (uint256 total) {
         BoxAmountCheckpoint[] storage hist = referralAmountHistory[user];
         uint256 n = hist.length;
@@ -775,17 +1151,37 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         }
     }
 
-    // ---------------------------
-    // Internals: claim window & math
-    // ---------------------------
-
+    /**
+     * @notice 사용자의 클레임 가능한 구간 계산 - 클레임 윈도우
+     * @param lastClaimed 마지막으로 클레임한 일 인덱스 (UNSET이면 처음)
+     * @return fromDay 클레임 시작 일 인덱스 (포함)
+     * @return toDay 클레임 종료 일 인덱스 (포함)
+     * @dev 
+     * - lastClaimed 이후부터 lastSyncedDay-1까지의 구간 반환
+     * - UNSET인 경우 처음부터 시작 (0부터)
+     * - 아직 확정된 날이 없으면 (1, 0) 반환하여 클레임 불가 표시
+     */
     function _claimWindow(uint256 lastClaimed) internal view returns (uint256 fromDay, uint256 toDay) {
-        if (lastSyncedDay == 0) return (1, 0);
+        if (lastSyncedDay == 0) {
+            return (1, 0);
+        }
         uint256 lastFinal = lastSyncedDay - 1;
         fromDay = (lastClaimed == UNSET) ? 0 : (lastClaimed + 1);
-        toDay   = lastFinal;
+        toDay = lastFinal;
     }
 
+    /**
+     * @notice 체크포인트 히스토리 기반으로 보상 계산 - 확정된 보상
+     * @param hist 사용자의 체크포인트 히스토리 배열
+     * @param cumReward 일별 누적 보상 매핑 (cumRewardPerBox 또는 cumRewardPerRefUnit)
+     * @param fromDay 계산 시작 일 인덱스 (포함)
+     * @param toDay 계산 종료 일 인덱스 (포함)
+     * @return total 해당 구간의 총 보상량 (18 decimals)
+     * @dev 
+     * - 체크포인트의 효력 시작 시점을 기준으로 보유량 변화 추적
+     * - 각 구간별로 보유량 × 누적 보상 차이 계산
+     * - prefix-sum 방식으로 효율적인 구간 합 계산
+     */
     function _calcByHistory(
         BoxAmountCheckpoint[] storage hist,
         mapping(uint256 => uint256) storage cumReward,
@@ -821,15 +1217,75 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         }
     }
 
-    function _rangeSum(mapping(uint256 => uint256) storage cum, uint256 a, uint256 b) internal view returns (uint256 s) {
+    /**
+     * @notice 누적 배열에서 구간 합 계산 - prefix-sum 활용
+     * @param cum 누적값을 저장하는 매핑
+     * @param a 구간 시작 인덱스 (포함)
+     * @param b 구간 종료 인덱스 (포함)
+     * @return s 구간 [a, b]의 합
+     * @dev 
+     * - cum[b] - cum[a-1]로 구간 [a, b]의 합 계산
+     * - a > b인 경우 0 반환
+     * - a == 0인 경우 cum[b] 반환 (0부터 b까지의 누적)
+     */
+    function _rangeSum(
+        mapping(uint256 => uint256) storage cum, 
+        uint256 a, 
+        uint256 b
+    ) internal view returns (uint256 s) {
         if (a > b) return 0;
         if (a == 0) return cum[b];
         return cum[b] - cum[a - 1];
     }
 
-    /// @notice 18dec 금액을 소수 6자리로 절삭(항상 적용)
+    /**
+     * @notice 18dec 금액을 소수 6자리로 절삭(항상 적용) - 정밀도 조정
+     * @param amount18 18 decimals 기준 금액
+     * @return 6 decimals로 절삭된 금액
+     * @dev 
+     * - 18 decimals에서 6 decimals로 변환 시 하위 12자리 절삭
+     * - 항상 내림 처리하여 사용자에게 과다 지급 방지
+     * - 최종 지급액 계산 시 반드시 적용
+     */
     function _applyFloor6(uint256 amount18) internal pure returns (uint256) {
         uint256 mod = 1e12; // 10^(18-6)
         return amount18 - (amount18 % mod);
     }
+
+    // ===== balances snapshot helpers =====
+
+    function _balanceAtDay(BoxAmountCheckpoint[] storage hist, uint256 day) internal view returns (uint256) {
+        uint256 n = hist.length;
+        if (n == 0) return 0;
+        uint256 i = 0;
+        uint256 cur = 0;
+        while (i < n && hist[i].day <= day) {
+            cur = hist[i].amount;
+            unchecked { i++; }
+        }
+        return cur;
+    }
+
+    /// @notice day 인덱스(0-base) 기준 구매 박스 수량
+    function buyerBoxesAtDay(address user, uint256 day) external view returns (uint256) {
+        return _balanceAtDay(buyerBoxAmountHistory[user], day);
+    }
+
+    /// @notice day 인덱스(0-base) 기준 레퍼럴 유치 단위 수량
+    function referralUnitsAtDay(address user, uint256 day) external view returns (uint256) {
+        return _balanceAtDay(referralAmountHistory[user], day);
+    }
+
+    /// @notice timestamp 기준 구매 박스 수량
+    function buyerBoxesAtTs(address user, uint256 ts) external view returns (uint256) {
+        uint256 d = (ts < vestingStartDate) ? 0 : (ts - vestingStartDate) / SECONDS_PER_DAY;
+        return _balanceAtDay(buyerBoxAmountHistory[user], d);
+    }
+
+    /// @notice timestamp 기준 레퍼럴 유치 단위 수량
+    function referralUnitsAtTs(address user, uint256 ts) external view returns (uint256) {
+        uint256 d = (ts < vestingStartDate) ? 0 : (ts - vestingStartDate) / SECONDS_PER_DAY;
+        return _balanceAtDay(referralAmountHistory[user], d);
+    }
+
 }

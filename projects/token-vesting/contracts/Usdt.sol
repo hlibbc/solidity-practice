@@ -5,13 +5,13 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
- * @title Usdt Template Contract
- * @notice Usdt template 컨트랙트
+ * @title StableCoin Template Contract
+ * @notice StableCoin template 컨트랙트
  * @dev EIP-2612 permit 기능을 지원하는 ERC20 토큰
  * decimal: 6
  * @author hlibbc
  */
-contract Usdt is ERC20Permit, Ownable {
+contract StableCoin is ERC20Permit, Ownable {
     // def. CONSTANT
     uint256 public constant INITIAL_SUPPLY = 10_000_000_000 * 10 ** 6; /// 100억 STT
 

@@ -6,7 +6,7 @@ const { deployFixture } = require("./helpers/vestingFixture");
 describe("vesting.access", function () {
 
   it("onlyOwner 보호: backfill/initialize/setVestingToken/syncLimitDay", async () => {
-    const { vesting, usdt, buyer, start, DAY } = await deployFixture();
+    const { vesting, stableCoin, buyer, start, DAY } = await deployFixture();
 
     const ends2 = [
       start - 1n + DAY * 10n,
@@ -22,7 +22,7 @@ describe("vesting.access", function () {
 
     // setVestingToken
     await expect(
-      vesting.connect(buyer).setVestingToken(await usdt.getAddress())
+      vesting.connect(buyer).setVestingToken(await stableCoin.getAddress())
     ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount")
      .withArgs(buyer.address);
 

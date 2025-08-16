@@ -7,14 +7,14 @@ const ONE_USDT = 10n ** 6n;
 async function deployFixture() {
   const [owner, buyer, referrer, other, ...rest] = await ethers.getSigners();
 
-  const USDT = await ethers.getContractFactory("Usdt");
-  const usdt = await USDT.deploy();
+  const StableCoin = await ethers.getContractFactory("StableCoin");
+  const stableCoin = await StableCoin.deploy();
 
   const now = BigInt((await ethers.provider.getBlock("latest")).timestamp);
   const start = now;
 
   const TV = await ethers.getContractFactory("TokenVesting");
-  const vesting = await TV.deploy(await usdt.getAddress(), start);
+  const vesting = await TV.deploy(await stableCoin.getAddress(), start);
 
   const ends = [
     start - 1n + DAY * 365n,
@@ -52,7 +52,7 @@ async function deployFixture() {
 
   return {
     owner, buyer, referrer, other,
-    usdt, vesting, start, ends, buyerTotals, refTotals,
+    stableCoin, vesting, start, ends, buyerTotals, refTotals,
     DAY, ONE_USDT, seedReferralFor, increaseTime
   };
 }

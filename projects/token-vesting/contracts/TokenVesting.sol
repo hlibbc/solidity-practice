@@ -8,13 +8,14 @@ import "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "./interface/IBadgeSBT.sol";
 
 /**
  * @title TokenVesting - 동적 연차 기반 토큰 베스팅 시스템
  * @notice 
  *  - 매일 UTC 00:00에 전일 보상 확정(sync)
  *  - 연차 수/연차 경계/연차 총량을 동적 배열로 관리(초기화는 별도 1회 함수)
- *  - 구매는 USDT(EIP-2612 permit) 결제, 결제액 10% 추천인 USDT 바이백 적립
+ *  - 구매는 StableCoin(EIP-2612 permit) 결제, 결제액 10% 추천인 StableCoin 바이백 적립
  *  - 레퍼럴: 대문자/숫자 8자리 코드 입력 필수(자기추천 금지), 신규 구매자에게 자동 코드 배정
  *  - 보상 계산은 확정 일별 단위보상의 누적합(prefix-sum) × 체크포인트
  * @dev 
@@ -22,7 +23,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  *  - 구매자 풀과 추천인 풀로 분리되어 각각 독립적으로 보상 계산
  *  - 체크포인트 기반으로 사용자별 보유량 변화를 추적
  */
-contract TokenVesting is Ownable, ReentrancyGuard {
+contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
 
     using Math for uint256;
 
@@ -41,7 +42,6 @@ contract TokenVesting is Ownable, ReentrancyGuard {
 
     /**
      * @notice EIP-2612 기반 permit 서명에 필요한 구조체 정보
-     * @notice USDT 결제 시 approve 없이 서명만으로 결제 가능하게 함
      * @dev
      * - value: permit할 금액 (amount)
      * - deadline: 만료시각 (epoch)
@@ -58,9 +58,10 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     /// def. constant
     uint256 public constant SECONDS_PER_DAY = 86400; // 1일 (86400초) - UTC 자정 기준 계산용
     uint256 public constant BUYBACK_PERCENT = 10; // 추천인 바이백 비율 (10%)
+    IBadgeSBT.BurnAuth private constant SBT_BURNAUTH = IBadgeSBT.BurnAuth.Neither;
 
     /// def. immutable
-    IERC20  public immutable stableCoin; // 박스구매 결제용 스테이블코인 (예: USDT)
+    IERC20  public immutable stableCoin; // 박스구매 결제용 스테이블코인
     uint256 public immutable vestingStartDate; // 베스팅 시작 시각 (UTC 자정 기준)
 
     /// def. variable
@@ -117,7 +118,15 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     mapping(address => BoxAmountCheckpoint[]) public referralAmountHistory; // 유저별 레퍼럴 단위 보유량 체크포인트 히스토리
     mapping(address => uint256) public lastBuyerClaimedDay; // 유저가 purchase pool에서 마지막으로 claim한 day 인덱스
     mapping(address => uint256) public lastRefClaimedDay; // 유저가 referral pool에서 마지막으로 claim한 day 인덱스
-    mapping(address => uint256) public buybackUSDT; // 즉시 청구 가능한 USDT 바이백 잔액 (10% 수수료)
+    mapping(address => uint256) public buybackUSDT; // 즉시 청구 가능한 StableCoin 바이백 잔액 (10% 수수료)
+
+    /**
+     * @notice BadgeSBT 관련 정보
+     * @dev
+     */
+    IBadgeSBT public badgeSBT;
+    mapping(address => uint256) public sbtIdOf; // user -> SBT tokenId
+    mapping(address => uint256) public totalBoughtBoxes; // user -> 누적 구매량(박스 수)
 
     /// def. event
     /** 
@@ -169,7 +178,7 @@ contract TokenVesting is Ownable, ReentrancyGuard {
      * @dev
      * - buyBox 성공 시 emit (adminBackfillPurchaseAt도 동일 이벤트 emit)
      * - 당일 구매분은 다음 날부터 보상에 반영됨(effDay = dToday + 1)
-     * - paidAmount / buyback 단위: stableCoin의 최소 단위(예: USDT 6dec)
+     * - paidAmount / buyback 단위: stableCoin의 최소 단위(예: USDT, USDC의 경우 6dec)
      * - 자기추천 불가 (referrer != buyer 검증)
      * - 레퍼럴 코드는 정규화된 8자리 bytes8 형태로 저장
      */
@@ -221,12 +230,12 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     );
 
     /**
-     * @notice 추천 바이백(USDT) 청구 완료 이벤트 - 수수료 환급
+     * @notice 추천 바이백(StableCoin) 청구 완료 이벤트 - 수수료 환급
      * @param user 청구 사용자 주소
-     * @param amount 지급된 USDT 금액(최소 단위)
+     * @param amount 지급된 StableCoin 금액(최소 단위)
      * @dev
      * - buybackUSDT[user]에 누적된 전액을 출금하고 0으로 초기화
-     * - amount 단위는 stableCoin의 최소 단위(예: USDT 6dec)
+     * - amount 단위는 stableCoin의 최소 단위(예: USDT, USDC 6dec)
      * - 추천인은 자신이 추천한 구매의 10%를 USDT로 즉시 수령 가능
      * - 바이백은 구매 시점에 즉시 적립되고 언제든지 청구 가능
      */
@@ -246,17 +255,22 @@ contract TokenVesting is Ownable, ReentrancyGuard {
      */
     event VestingTokenSet(address token);
 
+    event BadgeSBTMinted(address indexed user, uint256 indexed tokenId);
+    event BadgeSBTUpgraded(address indexed user, uint256 indexed tokenId, IBadgeSBT.Tier tier, uint256 totalBoxes);
+
+
     /**
      * @notice TokenVesting 컨트랙트 생성자
-     * @param _stableCoin 결제/바이백 스테이블코인 주소 (예: USDT)
+     * @param _forwarder 위임대납 forwarder 주소
+     * @param _stableCoin 결제/바이백 스테이블코인 주소
      * @param _start 베스팅 시작 자정(UTC) — 예: 2025-06-03 00:00:00
      * @dev 
      * - 스케줄(연차 경계/총량) 초기화는 반드시 별도 함수로 1회 수행해야 함
      * - 베스팅 시작 시각은 UTC 자정 기준으로 설정되어야 함
      * - 생성 직후에는 스케줄이 초기화되지 않은 상태로 시작
      */
-    constructor(address _stableCoin, uint256 _start) Ownable(msg.sender) {
-        require(_stableCoin != address(0), "invalid USDT");
+    constructor(address _forwarder, address _stableCoin, uint256 _start) Ownable(msg.sender) ERC2771Context(_forwarder) {
+        require(_stableCoin != address(0), "invalid StableCoin");
         stableCoin = IERC20(_stableCoin);
 
         vestingStartDate = _start;
@@ -264,6 +278,44 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         scheduleInitialized = false; // 스케줄은 initializeSchedule 함수로 1회 설정해야 함
         nextSyncTs = vestingStartDate; // 자정 틱 기준점만 먼저 세팅
         lastSyncedDay = 0;
+    }
+
+    /**
+     * @notice 메타트랜잭션의 실제 서명자 주소 반환
+     * @return sender 메타트랜잭션을 서명한 실제 사용자 주소
+     * @dev 
+     * - Context와 ERC2771Context를 모두 상속받아 구현
+     * - 일반 트랜잭션에서는 msg.sender 반환
+     * - 메타트랜잭션에서는 서명된 데이터에서 추출된 서명자 주소 반환
+     * - 메타트랜잭션의 보안을 위해 필수적인 함수
+     */
+    function _msgSender() internal view override(Context, ERC2771Context) returns (address sender) {
+        return super._msgSender();
+    }
+
+    /**
+     * @notice 메타트랜잭션의 실제 호출 데이터 반환
+     * @return 메타트랜잭션의 원본 호출 데이터 (서명 제외)
+     * @dev 
+     * - Context와 ERC2771Context를 모두 상속받아 구현
+     * - 일반 트랜잭션에서는 msg.data 반환
+     * - 메타트랜잭션에서는 서명을 제외한 원본 데이터 반환
+     * - 메타트랜잭션의 데이터 무결성 검증에 필수적인 함수
+     */
+    function _msgData() internal view override(Context, ERC2771Context) returns (bytes calldata) {
+        return super._msgData();
+    }
+
+    /**
+     * @notice ERC2771 컨텍스트 접미사 길이 반환
+     * @return 20 ERC2771 메타트랜잭션에서 사용하는 접미사 길이 (20바이트)
+     * @dev 
+     * - ERC2771Context에서 요구하는 추상 함수 구현
+     * - 메타트랜잭션의 서명자 주소를 추출하기 위한 접미사 길이
+     * - 20바이트는 이더리움 주소의 길이와 일치
+     */
+    function _contextSuffixLength() internal pure override(Context, ERC2771Context) returns (uint256) {
+        return 20;
     }
 
     /**
@@ -400,7 +452,7 @@ contract TokenVesting is Ownable, ReentrancyGuard {
      * @param refCodeStr 추천인 레퍼럴 '문자열 코드'
      * @param boxCount 구매한 박스 수량
      * @param purchaseTs 구매 시점 타임스탬프
-     * @param paidUnits 결제된 USDT 금액 (최소 단위)
+     * @param paidUnits 결제된 StableCoin 금액 (최소 단위)
      * @param creditBuyback 바이백을 적립할지 여부
      * @dev 
      * - onlyOwner만 호출 가능
@@ -457,6 +509,10 @@ contract TokenVesting is Ownable, ReentrancyGuard {
 
         // 3) 구매 이벤트 emit (referrer 없으면 0, 코드도 0)
         emit BoxesPurchased(buyer, boxCount, referrer, paidUnits, buyback, refCode);
+
+        totalBoughtBoxes[buyer] += boxCount;
+        uint256 sbtId = _ensureSbt(buyer);
+        _upgradeBadgeIfNeeded(buyer, sbtId);
     }
 
 
@@ -508,7 +564,7 @@ contract TokenVesting is Ownable, ReentrancyGuard {
                 p.value, p.deadline, p.v, p.r, p.s
             );
         }
-        require(stableCoin.transferFrom(msg.sender, address(this), cost), "USDT xfer failed");
+        require(stableCoin.transferFrom(msg.sender, address(this), cost), "StableCoin xfer failed");
 
         uint256 buyback = (cost * BUYBACK_PERCENT) / 100;
         buybackUSDT[referrer] += buyback;
@@ -519,10 +575,13 @@ contract TokenVesting is Ownable, ReentrancyGuard {
 
         _pushBuyerCheckpoint(msg.sender, dToday + 1, boxCount);
         _pushRefCheckpoint(referrer, dToday + 1, boxCount);
-
         _ensureReferralCode(msg.sender);
 
         emit BoxesPurchased(msg.sender, boxCount, referrer, cost, buyback, normCode);
+
+        totalBoughtBoxes[msg.sender] += boxCount; // ① 누적 구매량 갱신
+        uint256 sbtId = _ensureSbt(msg.sender); // ② 첫 구매면 SBT 민트
+        _upgradeBadgeIfNeeded(msg.sender, sbtId); // ③ 등급 갱신(URI 업데이트)
     }
 
     /**
@@ -670,7 +729,7 @@ contract TokenVesting is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice 추천 바이백(USDT) 청구 - 수수료 환급
+     * @notice 추천 바이백(StableCoin) 청구 - 수수료 환급
      * @dev 
      * - nonReentrant로 재진입 공격 방지
      * - 누적된 바이백 전액을 출금하고 0으로 초기화
@@ -680,7 +739,7 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         uint256 amt = buybackUSDT[msg.sender];
         require(amt > 0, "nothing");
         buybackUSDT[msg.sender] = 0;
-        require(stableCoin.transfer(msg.sender, amt), "USDT xfer failed");
+        require(stableCoin.transfer(msg.sender, amt), "StableCoin xfer failed");
         emit BuybackClaimed(msg.sender, amt);
     }
 
@@ -1254,6 +1313,17 @@ contract TokenVesting is Ownable, ReentrancyGuard {
 
     // ===== balances snapshot helpers =====
 
+    /**
+     * @notice 특정 날짜 기준 사용자의 보유량 조회 - 체크포인트 기반
+     * @param hist 사용자의 체크포인트 히스토리 배열
+     * @param day 조회할 날짜 인덱스 (0-base)
+     * @return 해당 날짜에 유효한 보유량
+     * @dev 
+     * - 체크포인트 배열을 순회하며 day 이하의 가장 최근 체크포인트 찾기
+     * - 체크포인트가 없으면 0 반환
+     * - 체크포인트의 day는 해당 날짜부터 효력이 생기는 시점
+     * - 효율적인 이진 탐색 대신 선형 탐색 사용 (체크포인트 수가 적음)
+     */
     function _balanceAtDay(BoxAmountCheckpoint[] storage hist, uint256 day) internal view returns (uint256) {
         uint256 n = hist.length;
         if (n == 0) return 0;
@@ -1266,26 +1336,84 @@ contract TokenVesting is Ownable, ReentrancyGuard {
         return cur;
     }
 
-    /// @notice day 인덱스(0-base) 기준 구매 박스 수량
+    /**
+     * @notice 특정 날짜 기준 사용자의 구매 박스 보유량 조회
+     * @param user 조회할 사용자 주소
+     * @param day 조회할 날짜 인덱스 (0-base, 베스팅 시작일 기준)
+     * @return 해당 날짜에 유효한 구매 박스 보유량
+     * @dev 
+     * - 내부 _balanceAtDay 함수를 호출하여 체크포인트 기반 보유량 계산
+     * - day는 베스팅 시작일을 0으로 하는 인덱스
+     * - 체크포인트가 없는 경우 0 반환
+     */
     function buyerBoxesAtDay(address user, uint256 day) external view returns (uint256) {
         return _balanceAtDay(buyerBoxAmountHistory[user], day);
     }
 
-    /// @notice day 인덱스(0-base) 기준 레퍼럴 유치 단위 수량
+    /**
+     * @notice 특정 날짜 기준 사용자의 레퍼럴 유치 단위 보유량 조회
+     * @param user 조회할 추천인 주소
+     * @param day 조회할 날짜 인덱스 (0-base, 베스팅 시작일 기준)
+     * @return 해당 날짜에 유효한 레퍼럴 유치 단위 보유량
+     * @dev 
+     * - 내부 _balanceAtDay 함수를 호출하여 체크포인트 기반 보유량 계산
+     * - day는 베스팅 시작일을 0으로 하는 인덱스
+     * - 체크포인트가 없는 경우 0 반환
+     * - 레퍼럴 보상 계산에 사용되는 핵심 데이터
+     */
     function referralUnitsAtDay(address user, uint256 day) external view returns (uint256) {
         return _balanceAtDay(referralAmountHistory[user], day);
     }
 
-    /// @notice timestamp 기준 구매 박스 수량
+    /**
+     * @notice 특정 시점 기준 사용자의 구매 박스 보유량 조회
+     * @param user 조회할 사용자 주소
+     * @param ts 조회할 시점 (Unix timestamp)
+     * @return 해당 시점에 유효한 구매 박스 보유량
+     * @dev 
+     * - timestamp를 베스팅 시작일 기준 day 인덱스로 변환
+     * - ts < vestingStartDate인 경우 day = 0으로 처리
+     * - 내부 _balanceAtDay 함수를 호출하여 체크포인트 기반 보유량 계산
+     * - 실시간 보유량 조회에 유용한 함수
+     */
     function buyerBoxesAtTs(address user, uint256 ts) external view returns (uint256) {
         uint256 d = (ts < vestingStartDate) ? 0 : (ts - vestingStartDate) / SECONDS_PER_DAY;
         return _balanceAtDay(buyerBoxAmountHistory[user], d);
     }
 
-    /// @notice timestamp 기준 레퍼럴 유치 단위 수량
+    /**
+     * @notice 특정 시점 기준 사용자의 레퍼럴 유치 단위 보유량 조회
+     * @param user 조회할 추천인 주소
+     * @param ts 조회할 시점 (Unix timestamp)
+     * @return 해당 시점에 유효한 레퍼럴 유치 단위 보유량
+     * @dev 
+     * - timestamp를 베스팅 시작일 기준 day 인덱스로 변환
+     * - ts < vestingStartDate인 경우 day = 0으로 처리
+     * - 내부 _balanceAtDay 함수를 호출하여 체크포인트 기반 보유량 계산
+     * - 실시간 레퍼럴 보상 계산에 유용한 함수
+     */
     function referralUnitsAtTs(address user, uint256 ts) external view returns (uint256) {
         uint256 d = (ts < vestingStartDate) ? 0 : (ts - vestingStartDate) / SECONDS_PER_DAY;
         return _balanceAtDay(referralAmountHistory[user], d);
     }
 
+    function _ensureSbt(address user) internal returns (uint256 tokenId) {
+        if (address(badgeSBT) == address(0)) return 0; // 미세팅이면 무시
+        tokenId = sbtIdOf[user];
+        if (tokenId == 0) {
+            // 초기 URI는 빈 문자열로 민트 → 즉시 upgradeBadgeByCount가 올바른 등급 URI로 갱신
+            tokenId = badgeSBT.mint(user, "", SBT_BURNAUTH);
+            sbtIdOf[user] = tokenId;
+            emit BadgeSBTMinted(user, tokenId);
+        }
+    }
+
+    function _upgradeBadgeIfNeeded(address user, uint256 tokenId) internal {
+        if (address(badgeSBT) == address(0) || tokenId == 0) return;
+        uint256 total = totalBoughtBoxes[user];
+        badgeSBT.upgradeBadgeByCount(tokenId, total);
+        // 이벤트(선택): 현재 등급 조회해서 로깅
+        IBadgeSBT.Tier t = badgeSBT.currentTier(tokenId);
+        emit BadgeSBTUpgraded(user, tokenId, t, total);
+    }
 }

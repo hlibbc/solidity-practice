@@ -6,10 +6,10 @@ const { deployFixture } = require("./helpers/vestingFixture");
 describe("vesting.claim", function () {
 
   it("claimPurchase/Referral: nothing to claim (lastSyncedDay==0) → revert", async () => {
-    const { vesting, usdt, buyer, referrer } = await deployFixture();
+    const { vesting, stableCoin, buyer, referrer } = await deployFixture();
 
     // vestingToken 설정만 해두면 됨(전송 전에 'nothing to claim'에서 멈춘다)
-    await vesting.setVestingToken(await usdt.getAddress());
+    await vesting.setVestingToken(await stableCoin.getAddress());
 
     await expect(vesting.connect(buyer).claimPurchaseReward())
       .to.be.revertedWith("nothing to claim");

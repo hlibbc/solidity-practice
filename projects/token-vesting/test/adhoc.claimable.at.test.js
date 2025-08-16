@@ -106,11 +106,11 @@ describe("adhoc.claimable.at", function () {
     const [owner] = await ethers.getSigners();
 
     // 1) 배포 (시작시각 고정)
-    const USDT = await ethers.getContractFactory("Usdt");
-    const usdt = await USDT.deploy();
+    const StableCoin = await ethers.getContractFactory("StableCoin");
+    const stableCoin = await StableCoin.deploy();
 
     const TV = await ethers.getContractFactory("TokenVesting");
-    const vesting = await TV.deploy(await usdt.getAddress(), START_TS);
+    const vesting = await TV.deploy(await stableCoin.getAddress(), START_TS);
 
     // 4개 term(각 365일), 기존 테스트와 동일 토큰양
     const DAY = 86400n;

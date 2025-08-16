@@ -22,12 +22,12 @@ describe("vesting.schedule", function () {
 
   it("initializeSchedule: 실패 케이스(길이/증가/시작전)", async () => {
     const [owner] = await ethers.getSigners();
-    const USDT = await ethers.getContractFactory("Usdt");
-    const usdt = await USDT.deploy();
+    const StableCoin = await ethers.getContractFactory("StableCoin");
+    const stableCoin = await StableCoin.deploy();
 
     const now = BigInt((await ethers.provider.getBlock("latest")).timestamp);
     const TV = await ethers.getContractFactory("TokenVesting");
-    const vesting = await TV.deploy(await usdt.getAddress(), now);
+    const vesting = await TV.deploy(await stableCoin.getAddress(), now);
 
     const ends_ok = [ now - 1n + 86400n, now - 1n + 86400n * 2n ];
     const ends_bad_len = [ now - 1n + 86400n ];

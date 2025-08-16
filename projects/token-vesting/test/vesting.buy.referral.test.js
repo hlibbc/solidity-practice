@@ -16,7 +16,7 @@ describe("vesting.buy.referral", function () {
   });
 
   it("buyBox: permit 경로 성공", async () => {
-    const { buyer, referrer, vesting, usdt, seedReferralFor } = await deployFixture();
+    const { buyer, referrer, vesting, stableCoin, seedReferralFor } = await deployFixture();
     const refCode = await seedReferralFor(referrer);
 
     const boxCount = 1n;
@@ -24,10 +24,10 @@ describe("vesting.buy.referral", function () {
     const deadline = BigInt((await ethers.provider.getBlock("latest")).timestamp) + 3600n;
 
     const domain = {
-      name: await usdt.name(),
+      name: await stableCoin.name(),
       version: "1",
       chainId: Number((await ethers.provider.getNetwork()).chainId),
-      verifyingContract: await usdt.getAddress(),
+      verifyingContract: await stableCoin.getAddress(),
     };
     const types = {
       Permit: [
@@ -38,7 +38,7 @@ describe("vesting.buy.referral", function () {
         { name: "deadline",type: "uint256" },
       ],
     };
-    const nonce = await usdt.nonces(buyer.address);
+    const nonce = await stableCoin.nonces(buyer.address);
     const message = {
       owner: buyer.address,
       spender: await vesting.getAddress(),

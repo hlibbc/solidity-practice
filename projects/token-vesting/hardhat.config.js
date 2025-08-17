@@ -1,6 +1,7 @@
 
 require("@nomicfoundation/hardhat-toolbox");
 require("dotenv").config({ path: require("path").resolve(__dirname, "../../.env") });
+require("@typechain/hardhat");
 
 // 필독: 외부 RPC에 연결해서 deploy할 경우, 해당 노드들이 cancun을 지원하지 않을 수 있음
 // 이 경우, RPC 사양을 확인해서 맞는 버전으로 재컴파일 요망
@@ -17,10 +18,15 @@ module.exports = {
       }
     }
   },
+  typechain: {
+    outDir: "types",        // 타입 생성 디렉토리
+    target: "ethers-v6",    // 꼭 v6로 지정
+  },
   // defaultNetwork: "development", // --network 생략하려면 필요. but 무조건 외부 provider 띄워야 함
   networks: {
     development: {
-      url: `http://127.0.0.1:8545`
+      url: `http://127.0.0.1:8545`,
+      accounts: [process.env.PRIVATE_KEY]
     }
   }
 };

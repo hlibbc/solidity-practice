@@ -703,16 +703,16 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         }
 
         // 일별 보상과 누적 보상 업데이트
-        rewardPerBox[d]        = perBox;
-        rewardPerReferal[d]    = perRef;
-        cumRewardPerBox[d]     = (d == 0 ? 0 : cumRewardPerBox[d - 1]) + perBox;
+        rewardPerBox[d] = perBox;
+        rewardPerReferal[d] = perRef;
+        cumRewardPerBox[d] = (d == 0 ? 0 : cumRewardPerBox[d - 1]) + perBox;
         cumRewardPerRefUnit[d] = (d == 0 ? 0 : cumRewardPerRefUnit[d - 1]) + perRef;
 
         // 누적 보유량 업데이트
         uint256 prevBoxes = d == 0 ? 0 : cumBoxes[d - 1];
-        uint256 prevRefs  = d == 0 ? 0 : cumReferals[d - 1];
-        cumBoxes[d]       = prevBoxes + boxesAddedPerDay[d];
-        cumReferals[d]    = prevRefs  + referralsAddedPerDay[d];
+        uint256 prevRefs = d == 0 ? 0 : cumReferals[d - 1];
+        cumBoxes[d] = prevBoxes + boxesAddedPerDay[d];
+        cumReferals[d] = prevRefs  + referralsAddedPerDay[d];
 
         emit DailySynced(d, perBox, perRef, boxesDenom, referralDenom);
 
@@ -784,11 +784,11 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * - USDT를 사용자에게 직접 전송
      */
     function claimBuyback() external nonReentrant {
-        uint256 amt = buybackUSDT[msg.sender];
-        require(amt > 0, "nothing");
+        uint256 amount = buybackUSDT[msg.sender];
+        require(amount > 0, "nothing");
         buybackUSDT[msg.sender] = 0;
-        require(stableCoin.transfer(msg.sender, amt), "StableCoin xfer failed");
-        emit BuybackClaimed(msg.sender, amt);
+        require(stableCoin.transfer(msg.sender, amount), "StableCoin xfer failed");
+        emit BuybackClaimed(msg.sender, amount);
     }
 
     /**
@@ -1477,5 +1477,76 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         // 이벤트(선택): 현재 등급 조회해서 로깅
         IBadgeSBT.Tier t = badgeSBT.currentTier(tokenId);
         emit BadgeSBTUpgraded(user, tokenId, t, total);
+    }
+
+    // ==== "어제" 하루치(풀별, 6dec 절삭) ====
+
+    /**
+     * @notice 특정 시점의 하루 시작 시각(자정)을 계산하는 내부 함수
+     * @param ts 기준 시각 (Unix timestamp)
+     * @return 해당 시점이 속한 하루의 시작 시각 (자정, UTC 00:00)
+     * @dev 
+     * - 베스팅 시작일 이전이면 vestingStartDate 반환
+     * - 베스팅 시작일 이후면 해당 시각이 속한 하루의 자정 시각 반환
+     * - SECONDS_PER_DAY(86400초) 단위로 정확한 하루 경계 계산
+     * - unchecked 블록으로 가스 최적화 (오버플로우 불가능)
+     */
+    function _dayStart(uint256 ts) internal view returns (uint256) {
+        if (ts <= vestingStartDate) {
+            return vestingStartDate;
+        }
+        unchecked {
+            return vestingStartDate + ((ts - vestingStartDate) / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+        }
+    }
+
+    /**
+     * @notice 구매자 풀 기준: 어제 하루 동안 벌어진 양(6dec, 절삭). 클레임/동기화와 무관.
+     * @param user 조회할 사용자 주소
+     * @return pay6 어제 하루 동안 벌어진 구매자 풀 보상 (6 decimals, 절삭)
+     * @dev 
+     * - 현재 시점을 기준으로 어제 하루의 보상만 계산
+     * - 베스팅 시작일 이전이면 0 반환
+     * - _previewBuyerPendingAt으로 어제 하루치 보상 계산 후 6dec 절삭
+     * - 실제 클레임이나 동기화와 무관한 순수 계산 함수
+     * - 실시간 대시보드나 UI 표시용으로 활용 가능
+     */
+    function previewBuyerEarnedYesterday(address user) external view returns (uint256 pay6) {
+        // 오늘 자정 시각 계산
+        uint256 todayStart = _dayStart(block.timestamp);
+        if (todayStart <= vestingStartDate) {
+            return 0;
+        }
+        // 어제 날짜 인덱스 계산 (오늘 - 1)
+        uint256 yIndex = ((todayStart - vestingStartDate) / SECONDS_PER_DAY) - 1;
+        // 어제 하루치 보상 계산 (18 decimals)
+        uint256 amount = _previewBuyerPendingAt(user, yIndex, yIndex);
+        // 6 decimals로 절삭하여 반환
+        return _applyFloor6(amount);
+    }
+
+    /**
+     * @notice 추천인 풀 기준: 어제 하루 동안 벌어진 양(6dec, 절삭). 클레임/동기화와 무관.
+     * @param user 조회할 추천인 주소
+     * @return pay6 어제 하루 동안 벌어진 추천인 풀 보상 (6 decimals, 절삭)
+     * @dev 
+     * - 현재 시점을 기준으로 어제 하루의 레퍼럴 보상만 계산
+     * - 베스팅 시작일 이전이면 0 반환
+     * - _previewRefPendingAt으로 어제 하루치 레퍼럴 보상 계산 후 6dec 절삭
+     * - 실제 클레임이나 동기화와 무관한 순수 계산 함수
+     * - 실시간 대시보드나 UI 표시용으로 활용 가능
+     */
+    function previewReferrerEarnedYesterday(address user) external view returns (uint256 pay6) {
+        // 오늘 자정 시각 계산
+        uint256 todayStart = _dayStart(block.timestamp);
+        if (todayStart <= vestingStartDate) {
+            return 0;
+        }
+        // 어제 날짜 인덱스 계산 (오늘 - 1)
+        uint256 yIndex = ((todayStart - vestingStartDate) / SECONDS_PER_DAY) - 1;
+        // 어제 하루치 레퍼럴 보상 계산 (18 decimals)
+        uint256 amount = _previewRefPendingAt(user, yIndex, yIndex);
+        // 6 decimals로 절삭하여 반환
+        return _applyFloor6(amount);
     }
 }

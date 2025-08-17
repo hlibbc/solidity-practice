@@ -94,10 +94,6 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
         admin = _candidate;
     }
 
-    // =========================
-    // Mint / Burn
-    // =========================
-
     /**
      * @notice SBT 발행(민트) - admin 전용, 이후 전송 불가
      * @param to 토큰 수취자 주소
@@ -156,10 +152,6 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
         _burn(tokenId);
     }
 
-    // =========================
-    // EIP-5192 / 5484
-    // =========================
-
     /**
      * @notice EIP-5192: 토큰의 잠금 상태 조회
      * @param tokenId 조회할 토큰의 ID
@@ -211,10 +203,6 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
         _requireOwned(tokenId);
         return _tierOf[tokenId];
     }
-
-    // =========================
-    // Admin-only: 등급 업그레이드(URI 갱신)
-    // =========================
 
     /**
      * @notice 구매량 기반 자동 등급 업그레이드 - admin 전용
@@ -311,7 +299,7 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
      * @param to 토큰을 받을 주소
      * @param tokenId 전송할 토큰의 ID
      * @param auth 인증된 주소
-     * @return 업데이트된 주소
+     * @return from 업데이트된 주소
      * @dev 
      * - OZ v5: _before/_afterTokenTransfer 대신 단일 훅 `_update` 사용
      * - mint: from == address(0) 허용
@@ -322,31 +310,26 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
     function _update(address to, uint256 tokenId, address auth)
         internal
         override(ERC721)
-        returns (address)
+        returns (address from)
     {
         // 주의: mint/burn 경로에서 ownerOf()는 revert 하므로 _ownerOf() 사용
-        address from = _ownerOf(tokenId);
+        from = _ownerOf(tokenId);
         if (from != address(0) && to != address(0)) {
             revert SBT_TransferNotAllowed();
         }
-        return super._update(to, tokenId, auth);
+        from = super._update(to, tokenId, auth);
+        if (to == address(0)) {
+            _cleanupTokenState(tokenId);
+        }
+
+        return from;
     }
 
-    // 승인 관련 차단(인터페이스는 ERC721 하나만 override 표기)
-    function approve(address, uint256) public override(ERC721,IERC721) {
-        revert SBT_ApprovalNotAllowed();
-    }
-    function setApprovalForAll(address, bool) public override(ERC721,IERC721) {
-        revert SBT_ApprovalNotAllowed();
-    }
-    function transferFrom(address, address, uint256) public override(ERC721,IERC721) {
-        revert SBT_TransferNotAllowed();
-    }
-    function safeTransferFrom(address, address, uint256) public override(ERC721,IERC721) {
-        revert SBT_TransferNotAllowed();
-    }
-    function safeTransferFrom(address, address, uint256, bytes memory) public override(ERC721,IERC721) {
-        revert SBT_TransferNotAllowed();
+    function _cleanupTokenState(uint256 tokenId) private {
+        delete _locked[tokenId];
+        delete _burnAuth[tokenId];
+        delete _issuer[tokenId];
+        delete _tierOf[tokenId];
     }
 
     // =========================
@@ -368,22 +351,6 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
         returns (string memory)
     {
         return ERC721URIStorage.tokenURI(tokenId);
-    }
-
-    /**
-     * @notice 토큰 소각 시 상태 정리
-     * @param tokenId 소각할 토큰의 ID
-     * @dev 
-     * - ERC721과 ERC721URIStorage의 _burn 함수 호출
-     * - 토큰 관련 모든 상태 변수 정리
-     * - 가스 절약을 위한 스토리지 정리
-     */
-    function _burn(uint256 tokenId) internal override {
-        super._burn(tokenId);
-        delete _locked[tokenId];
-        delete _burnAuth[tokenId];
-        delete _issuer[tokenId];
-        delete _tierOf[tokenId];
     }
 
     /**

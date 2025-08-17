@@ -123,6 +123,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     /**
      * @notice BadgeSBT 관련 정보
      * @dev
+     * - badgeSBT: BadgeSBT 컨트랙트 주소 (SBT 토큰 민팅 및 업그레이드용)
+     * - sbtIdOf: 사용자 주소 → 해당 사용자의 SBT 토큰 ID 매핑
+     * - totalBoughtBoxes: 사용자 주소 → 누적 구매한 박스 수량 (등급 결정용)
      */
     IBadgeSBT public badgeSBT;
     mapping(address => uint256) public sbtIdOf; // user -> SBT tokenId
@@ -255,9 +258,39 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      */
     event VestingTokenSet(address token);
 
-    event BadgeSBTMinted(address indexed user, uint256 indexed tokenId);
-    event BadgeSBTUpgraded(address indexed user, uint256 indexed tokenId, IBadgeSBT.Tier tier, uint256 totalBoxes);
 
+    /**
+     * @notice BadgeSBT 컨트랙트 주소 설정 이벤트 - SBT 컨트랙트 변경
+     * @param sbt 새로 설정된 BadgeSBT 컨트랙트 주소
+     * @dev onlyOwner로 BadgeSBT 컨트랙트 주소를 변경할 때 발생
+     */
+    event BadgeSBTSet(address sbt);
+
+    /**
+     * @notice BadgeSBT 토큰 민팅 완료 이벤트 - 새로운 SBT 토큰 생성
+     * @param user SBT 토큰을 받은 사용자 주소
+     * @param tokenId 새로 민팅된 SBT 토큰의 ID
+     * @dev 사용자가 첫 번째 박스를 구매할 때 자동으로 SBT 토큰이 민팅됨
+     */
+    event BadgeSBTMinted(
+        address indexed user, 
+        uint256 indexed tokenId
+    );
+    
+    /**
+     * @notice BadgeSBT 토큰 등급 업그레이드 이벤트 - 구매량 증가로 인한 등급 상승
+     * @param user 등급이 업그레이드된 사용자 주소
+     * @param tokenId 업그레이드된 SBT 토큰의 ID
+     * @param tier 새로운 등급 (Bronze, Silver, Gold, Platinum 등)
+     * @param totalBoxes 업그레이드 시점의 누적 구매 박스 수량
+     * @dev 사용자가 박스를 추가로 구매하여 등급이 상승할 때 발생
+     */
+    event BadgeSBTUpgraded(
+        address indexed user, 
+        uint256 indexed tokenId, 
+        IBadgeSBT.Tier tier, 
+        uint256 totalBoxes
+    );
 
     /**
      * @notice TokenVesting 컨트랙트 생성자
@@ -364,6 +397,21 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         require(_token != address(0), "invalid token");
         vestingToken = IERC20(_token);
         emit VestingTokenSet(_token);
+    }
+
+    /**
+     * @notice BadgeSBT 컨트랙트 주소 설정 - SBT 컨트랙트 변경
+     * @param _sbt 새로 설정할 BadgeSBT 컨트랙트 주소
+     * @dev 
+     * - onlyOwner만 호출 가능
+     * - 기존 SBT 토큰들은 그대로 유지되며, 새로운 컨트랙트로 관리됨
+     * - 설정 완료 시 BadgeSBTSet 이벤트 발생
+     * - 주소는 0이 될 수 없음 (유효성 검증)
+     */
+    function setBadgeSBT(address _sbt) external onlyOwner {
+        require(_sbt != address(0), "invalid sbt");
+        badgeSBT = IBadgeSBT(_sbt);
+        emit BadgeSBTSet(_sbt);
     }
 
     /**
@@ -1134,7 +1182,6 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
                 prevBoxes += boxesAddedPerDay[dd];
             }
         }
-
         // ── 3) 일 단위 시뮬레이션 루프: startSim..endSim (둘 다 포함)
         for (uint256 d = startSim; d <= endSim; d++) {
             // d일에 효력 시작하는 체크포인트가 있으면 유저 잔액(curBal) 갱신
@@ -1144,7 +1191,6 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
                     i++;
                 }
             }
-
             // 분모: 항상 "전일까지의 누적 박스 수"
             uint256 denom = prevBoxes;
 
@@ -1156,16 +1202,10 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
                 uint256 pool = _dailyPoolRawByTs(dayStartTs, true);
 
                 if (pool > 0) {
-                    // 유저 하루치 = curBal * (pool / denom)
                     // 현재 구현(곱→나눗셈 순서)에서는 나눗셈 내림에 따른 손실이 먼저 발생할 수 있음.
                     total += curBal * (pool / denom);
-
-                    // [정밀도 개선 권장안]
-                    // OpenZeppelin Math.mulDiv를 사용하면 (curBal * pool) / denom 를 256-bit 정확도로 계산.
-                    // total += Math.mulDiv(curBal, pool, denom);
                 }
             }
-
             // 다음 날(d+1)을 위해 누적 박스 수를 갱신:
             // "오늘(d) 추가된 판매량"을 전일까지 누적치(prevBoxes)에 더해 둔다.
             prevBoxes += boxesAddedPerDay[d];
@@ -1397,6 +1437,17 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         return _balanceAtDay(referralAmountHistory[user], d);
     }
 
+    /**
+     * @notice 사용자의 SBT 토큰을 보장하는 내부 함수 - SBT 토큰 민팅
+     * @param user SBT 토큰을 보장할 사용자 주소
+     * @return tokenId 사용자의 SBT 토큰 ID (기존 또는 새로 민팅된 것)
+     * @dev 
+     * - BadgeSBT 컨트랙트가 설정되지 않은 경우 0 반환 (무시)
+     * - 사용자가 이미 SBT 토큰을 가지고 있으면 기존 tokenId 반환
+     * - 첫 번째 SBT 토큰인 경우 빈 URI로 민팅 후 tokenId 반환
+     * - 민팅 완료 시 BadgeSBTMinted 이벤트 발생
+     * - SBT_BURNAUTH.Neither로 설정하여 소각 불가능하게 설정
+     */
     function _ensureSbt(address user) internal returns (uint256 tokenId) {
         if (address(badgeSBT) == address(0)) return 0; // 미세팅이면 무시
         tokenId = sbtIdOf[user];
@@ -1408,6 +1459,17 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         }
     }
 
+    /**
+     * @notice 사용자의 SBT 토큰 등급을 필요시 업그레이드하는 내부 함수 - 등급 상승
+     * @param user 등급을 업그레이드할 사용자 주소
+     * @param tokenId 사용자의 SBT 토큰 ID
+     * @dev 
+     * - BadgeSBT 컨트랙트가 설정되지 않았거나 tokenId가 0인 경우 무시
+     * - 사용자의 누적 구매 박스 수량을 기준으로 등급 결정
+     * - BadgeSBT 컨트랙트의 upgradeBadgeByCount 함수 호출하여 등급 업데이트
+     * - 업그레이드 완료 후 현재 등급을 조회하여 BadgeSBTUpgraded 이벤트 발생
+     * - 구매량 증가에 따른 자동 등급 상승 시스템
+     */
     function _upgradeBadgeIfNeeded(address user, uint256 tokenId) internal {
         if (address(badgeSBT) == address(0) || tokenId == 0) return;
         uint256 total = totalBoughtBoxes[user];

@@ -30,12 +30,12 @@ function parseUsersCsv(csvText) {
   const lower = firstCols.map(s => s.toLowerCase());
   let startIdx = 0, walletIdx = 0, codeIdx = 1;
 
-  const hasHeader = ["wallet","address","wallet_address","referral_code","refcode","code"]
+  const hasHeader = ["wallet_address","referral_code"]
     .some(h => lower.includes(h));
 
   if (hasHeader) {
-    walletIdx = lower.findIndex(h => ["wallet","address","wallet_address"].includes(h));
-    codeIdx   = lower.findIndex(h => ["referral_code","refcode","code"].includes(h));
+    walletIdx = lower.findIndex(h => ["wallet_address"].includes(h));
+    codeIdx   = lower.findIndex(h => ["referral_code"].includes(h));
     if (walletIdx === -1 || codeIdx === -1) {
       throw new Error("user.csv 헤더를 인식하지 못했습니다.");
     }
@@ -65,11 +65,11 @@ function parsePurchasesCsv(csvText) {
   let startIdx = 0;
 
   const headerMap = {
-    wallet: lower.findIndex(h => ["wallet","address","wallet_address","buyer","user","account"].includes(h)),
-    ref:    lower.findIndex(h => ["referral","referral_code","refcode","code","ref"].includes(h)),
-    amount: lower.findIndex(h => ["amount","qty","quantity","box","box_count","boxes"].includes(h)),
-    price:  lower.findIndex(h => ["avg_price","price","unit_price","avgprice"].includes(h)),
-    time:   lower.findIndex(h => ["create_at","created_at","timestamp","time","datetime","date"].includes(h)),
+    wallet: lower.findIndex(h => ["wallet_address"].includes(h)),
+    ref:    lower.findIndex(h => ["referral"].includes(h)),
+    amount: lower.findIndex(h => ["amount"].includes(h)),
+    price:  lower.findIndex(h => ["avg_price"].includes(h)),
+    time:   lower.findIndex(h => ["created_at"].includes(h)),
   };
 
   const hasHeader = Object.values(headerMap).some(i => i !== -1);

@@ -25,9 +25,21 @@ describe("vesting.schedule", function () {
     const StableCoin = await ethers.getContractFactory("StableCoin");
     const stableCoin = await StableCoin.deploy();
 
+    // ── TokenVesting 배포 (새 생성자: forwarder, stableCoin, start)
     const now = BigInt((await ethers.provider.getBlock("latest")).timestamp);
     const TV = await ethers.getContractFactory("TokenVesting");
-    const vesting = await TV.deploy(await stableCoin.getAddress(), now);
+    const vesting = await TV.deploy(
+      ethers.ZeroAddress,
+      await stableCoin.getAddress(),
+      now
+    );
+
+    // ── BadgeSBT 배포: admin = vesting (mint/upgrade가 onlyAdmin이므로)
+    const BadgeSBT = await ethers.getContractFactory("BadgeSBT");
+    const sbt = await BadgeSBT.deploy("Badge", "BDG", await vesting.getAddress());
+
+    // ── TokenVesting에 SBT 주소 연결
+    await vesting.setBadgeSBT(await sbt.getAddress());
 
     const ends_ok = [ now - 1n + 86400n, now - 1n + 86400n * 2n ];
     const ends_bad_len = [ now - 1n + 86400n ];

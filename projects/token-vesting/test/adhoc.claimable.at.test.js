@@ -109,8 +109,20 @@ describe("adhoc.claimable.at", function () {
     const StableCoin = await ethers.getContractFactory("StableCoin");
     const stableCoin = await StableCoin.deploy();
 
+    // ── TokenVesting 배포 (새 생성자: forwarder, stableCoin, start)
     const TV = await ethers.getContractFactory("TokenVesting");
-    const vesting = await TV.deploy(await stableCoin.getAddress(), START_TS);
+    const vesting = await TV.deploy(
+      ethers.ZeroAddress,
+      await stableCoin.getAddress(),
+      START_TS
+    );
+
+    // ── BadgeSBT 배포: admin = vesting (mint/upgrade가 onlyAdmin이므로)
+    const BadgeSBT = await ethers.getContractFactory("BadgeSBT");
+    const sbt = await BadgeSBT.deploy("Badge", "BDG", await vesting.getAddress());
+
+    // ── TokenVesting에 SBT 주소 연결
+    await vesting.setBadgeSBT(await sbt.getAddress());
 
     // 4개 term(각 365일), 기존 테스트와 동일 토큰양
     const DAY = 86400n;

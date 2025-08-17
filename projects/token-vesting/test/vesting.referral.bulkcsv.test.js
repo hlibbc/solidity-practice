@@ -32,8 +32,8 @@ function parseCsvRows(csv) {
     firstCols.includes("refcode") || firstCols.includes("code");
 
   if (headerMatches) {
-    walletIdx = firstCols.findIndex(h => ["wallet", "address", "wallet_address"].includes(h));
-    codeIdx   = firstCols.findIndex(h => ["referral_code", "refcode", "code"].includes(h));
+    walletIdx = firstCols.findIndex(h => ["wallet_address"].includes(h));
+    codeIdx   = firstCols.findIndex(h => ["referral_code"].includes(h));
     startIdx = 1;
   }
 

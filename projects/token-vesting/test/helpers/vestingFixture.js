@@ -7,15 +7,30 @@ const ONE_USDT = 10n ** 6n;
 async function deployFixture() {
   const [owner, buyer, referrer, other, ...rest] = await ethers.getSigners();
 
+  // ── StableCoin 배포
   const StableCoin = await ethers.getContractFactory("StableCoin");
   const stableCoin = await StableCoin.deploy();
 
+  // ── 시작 시각
   const now = BigInt((await ethers.provider.getBlock("latest")).timestamp);
   const start = now;
 
+  // ── TokenVesting 배포 (새 생성자: forwarder, stableCoin, start)
   const TV = await ethers.getContractFactory("TokenVesting");
-  const vesting = await TV.deploy(await stableCoin.getAddress(), start);
+  const vesting = await TV.deploy(
+    ethers.ZeroAddress,
+    await stableCoin.getAddress(),
+    start
+  );
 
+  // ── BadgeSBT 배포: admin = vesting (mint/upgrade가 onlyAdmin이므로)
+  const BadgeSBT = await ethers.getContractFactory("BadgeSBT");
+  const sbt = await BadgeSBT.deploy("Badge", "BDG", await vesting.getAddress());
+
+  // ── TokenVesting에 SBT 주소 연결
+  await vesting.setBadgeSBT(await sbt.getAddress());
+
+  // ── 스케줄 초기화
   const ends = [
     start - 1n + DAY * 365n,
     start - 1n + DAY * 365n * 2n,
@@ -34,15 +49,13 @@ async function deployFixture() {
     0n,
     0n,
   ];
-
   await vesting.initializeSchedule(ends, buyerTotals, refTotals);
 
-  // ✅ referrer에게 "SPLALABS" 코드를 직접 배정
+  // ✅ referrer에게 "SPLALABS" 코드 직접 배정
   async function seedReferralFor(signer) {
-    const code = "SPLALABS"; // 8자, A-Z/0-9 규칙 준수
-    // overwrite=true: 기존 코드가 있어도 덮어씀 (테스트 반복 실행 대비)
+    const code = "SPLALABS";
     await vesting.setReferralCode(signer.address, code, true);
-    return code; // 이후 테스트에서 buyBox 호출 시 문자열 그대로 사용
+    return code;
   }
 
   async function increaseTime(seconds) {
@@ -52,7 +65,7 @@ async function deployFixture() {
 
   return {
     owner, buyer, referrer, other,
-    stableCoin, vesting, start, ends, buyerTotals, refTotals,
+    stableCoin, sbt, vesting, start, ends, buyerTotals, refTotals,
     DAY, ONE_USDT, seedReferralFor, increaseTime
   };
 }

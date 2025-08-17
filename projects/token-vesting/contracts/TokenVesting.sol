@@ -123,6 +123,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     /**
      * @notice BadgeSBT 관련 정보
      * @dev
+     * - badgeSBT: BadgeSBT 컨트랙트 주소 (SBT 토큰 민팅 및 업그레이드용)
+     * - sbtIdOf: 사용자 주소 → 해당 사용자의 SBT 토큰 ID 매핑
+     * - totalBoughtBoxes: 사용자 주소 → 누적 구매한 박스 수량 (등급 결정용)
      */
     IBadgeSBT public badgeSBT;
     mapping(address => uint256) public sbtIdOf; // user -> SBT tokenId
@@ -255,9 +258,39 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      */
     event VestingTokenSet(address token);
 
-    event BadgeSBTMinted(address indexed user, uint256 indexed tokenId);
-    event BadgeSBTUpgraded(address indexed user, uint256 indexed tokenId, IBadgeSBT.Tier tier, uint256 totalBoxes);
 
+    /**
+     * @notice BadgeSBT 컨트랙트 주소 설정 이벤트 - SBT 컨트랙트 변경
+     * @param sbt 새로 설정된 BadgeSBT 컨트랙트 주소
+     * @dev onlyOwner로 BadgeSBT 컨트랙트 주소를 변경할 때 발생
+     */
+    event BadgeSBTSet(address sbt);
+
+    /**
+     * @notice BadgeSBT 토큰 민팅 완료 이벤트 - 새로운 SBT 토큰 생성
+     * @param user SBT 토큰을 받은 사용자 주소
+     * @param tokenId 새로 민팅된 SBT 토큰의 ID
+     * @dev 사용자가 첫 번째 박스를 구매할 때 자동으로 SBT 토큰이 민팅됨
+     */
+    event BadgeSBTMinted(
+        address indexed user, 
+        uint256 indexed tokenId
+    );
+    
+    /**
+     * @notice BadgeSBT 토큰 등급 업그레이드 이벤트 - 구매량 증가로 인한 등급 상승
+     * @param user 등급이 업그레이드된 사용자 주소
+     * @param tokenId 업그레이드된 SBT 토큰의 ID
+     * @param tier 새로운 등급 (Bronze, Silver, Gold, Platinum 등)
+     * @param totalBoxes 업그레이드 시점의 누적 구매 박스 수량
+     * @dev 사용자가 박스를 추가로 구매하여 등급이 상승할 때 발생
+     */
+    event BadgeSBTUpgraded(
+        address indexed user, 
+        uint256 indexed tokenId, 
+        IBadgeSBT.Tier tier, 
+        uint256 totalBoxes
+    );
 
     /**
      * @notice TokenVesting 컨트랙트 생성자
@@ -364,6 +397,21 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         require(_token != address(0), "invalid token");
         vestingToken = IERC20(_token);
         emit VestingTokenSet(_token);
+    }
+
+    /**
+     * @notice BadgeSBT 컨트랙트 주소 설정 - SBT 컨트랙트 변경
+     * @param _sbt 새로 설정할 BadgeSBT 컨트랙트 주소
+     * @dev 
+     * - onlyOwner만 호출 가능
+     * - 기존 SBT 토큰들은 그대로 유지되며, 새로운 컨트랙트로 관리됨
+     * - 설정 완료 시 BadgeSBTSet 이벤트 발생
+     * - 주소는 0이 될 수 없음 (유효성 검증)
+     */
+    function setBadgeSBT(address _sbt) external onlyOwner {
+        require(_sbt != address(0), "invalid sbt");
+        badgeSBT = IBadgeSBT(_sbt);
+        emit BadgeSBTSet(_sbt);
     }
 
     /**
@@ -655,16 +703,16 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         }
 
         // 일별 보상과 누적 보상 업데이트
-        rewardPerBox[d]        = perBox;
-        rewardPerReferal[d]    = perRef;
-        cumRewardPerBox[d]     = (d == 0 ? 0 : cumRewardPerBox[d - 1]) + perBox;
+        rewardPerBox[d] = perBox;
+        rewardPerReferal[d] = perRef;
+        cumRewardPerBox[d] = (d == 0 ? 0 : cumRewardPerBox[d - 1]) + perBox;
         cumRewardPerRefUnit[d] = (d == 0 ? 0 : cumRewardPerRefUnit[d - 1]) + perRef;
 
         // 누적 보유량 업데이트
         uint256 prevBoxes = d == 0 ? 0 : cumBoxes[d - 1];
-        uint256 prevRefs  = d == 0 ? 0 : cumReferals[d - 1];
-        cumBoxes[d]       = prevBoxes + boxesAddedPerDay[d];
-        cumReferals[d]    = prevRefs  + referralsAddedPerDay[d];
+        uint256 prevRefs = d == 0 ? 0 : cumReferals[d - 1];
+        cumBoxes[d] = prevBoxes + boxesAddedPerDay[d];
+        cumReferals[d] = prevRefs  + referralsAddedPerDay[d];
 
         emit DailySynced(d, perBox, perRef, boxesDenom, referralDenom);
 
@@ -736,11 +784,11 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * - USDT를 사용자에게 직접 전송
      */
     function claimBuyback() external nonReentrant {
-        uint256 amt = buybackUSDT[msg.sender];
-        require(amt > 0, "nothing");
+        uint256 amount = buybackUSDT[msg.sender];
+        require(amount > 0, "nothing");
         buybackUSDT[msg.sender] = 0;
-        require(stableCoin.transfer(msg.sender, amt), "StableCoin xfer failed");
-        emit BuybackClaimed(msg.sender, amt);
+        require(stableCoin.transfer(msg.sender, amount), "StableCoin xfer failed");
+        emit BuybackClaimed(msg.sender, amount);
     }
 
     /**
@@ -1134,7 +1182,6 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
                 prevBoxes += boxesAddedPerDay[dd];
             }
         }
-
         // ── 3) 일 단위 시뮬레이션 루프: startSim..endSim (둘 다 포함)
         for (uint256 d = startSim; d <= endSim; d++) {
             // d일에 효력 시작하는 체크포인트가 있으면 유저 잔액(curBal) 갱신
@@ -1144,7 +1191,6 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
                     i++;
                 }
             }
-
             // 분모: 항상 "전일까지의 누적 박스 수"
             uint256 denom = prevBoxes;
 
@@ -1156,16 +1202,10 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
                 uint256 pool = _dailyPoolRawByTs(dayStartTs, true);
 
                 if (pool > 0) {
-                    // 유저 하루치 = curBal * (pool / denom)
                     // 현재 구현(곱→나눗셈 순서)에서는 나눗셈 내림에 따른 손실이 먼저 발생할 수 있음.
                     total += curBal * (pool / denom);
-
-                    // [정밀도 개선 권장안]
-                    // OpenZeppelin Math.mulDiv를 사용하면 (curBal * pool) / denom 를 256-bit 정확도로 계산.
-                    // total += Math.mulDiv(curBal, pool, denom);
                 }
             }
-
             // 다음 날(d+1)을 위해 누적 박스 수를 갱신:
             // "오늘(d) 추가된 판매량"을 전일까지 누적치(prevBoxes)에 더해 둔다.
             prevBoxes += boxesAddedPerDay[d];
@@ -1397,6 +1437,17 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         return _balanceAtDay(referralAmountHistory[user], d);
     }
 
+    /**
+     * @notice 사용자의 SBT 토큰을 보장하는 내부 함수 - SBT 토큰 민팅
+     * @param user SBT 토큰을 보장할 사용자 주소
+     * @return tokenId 사용자의 SBT 토큰 ID (기존 또는 새로 민팅된 것)
+     * @dev 
+     * - BadgeSBT 컨트랙트가 설정되지 않은 경우 0 반환 (무시)
+     * - 사용자가 이미 SBT 토큰을 가지고 있으면 기존 tokenId 반환
+     * - 첫 번째 SBT 토큰인 경우 빈 URI로 민팅 후 tokenId 반환
+     * - 민팅 완료 시 BadgeSBTMinted 이벤트 발생
+     * - SBT_BURNAUTH.Neither로 설정하여 소각 불가능하게 설정
+     */
     function _ensureSbt(address user) internal returns (uint256 tokenId) {
         if (address(badgeSBT) == address(0)) return 0; // 미세팅이면 무시
         tokenId = sbtIdOf[user];
@@ -1408,6 +1459,17 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         }
     }
 
+    /**
+     * @notice 사용자의 SBT 토큰 등급을 필요시 업그레이드하는 내부 함수 - 등급 상승
+     * @param user 등급을 업그레이드할 사용자 주소
+     * @param tokenId 사용자의 SBT 토큰 ID
+     * @dev 
+     * - BadgeSBT 컨트랙트가 설정되지 않았거나 tokenId가 0인 경우 무시
+     * - 사용자의 누적 구매 박스 수량을 기준으로 등급 결정
+     * - BadgeSBT 컨트랙트의 upgradeBadgeByCount 함수 호출하여 등급 업데이트
+     * - 업그레이드 완료 후 현재 등급을 조회하여 BadgeSBTUpgraded 이벤트 발생
+     * - 구매량 증가에 따른 자동 등급 상승 시스템
+     */
     function _upgradeBadgeIfNeeded(address user, uint256 tokenId) internal {
         if (address(badgeSBT) == address(0) || tokenId == 0) return;
         uint256 total = totalBoughtBoxes[user];
@@ -1415,5 +1477,76 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         // 이벤트(선택): 현재 등급 조회해서 로깅
         IBadgeSBT.Tier t = badgeSBT.currentTier(tokenId);
         emit BadgeSBTUpgraded(user, tokenId, t, total);
+    }
+
+    // ==== "어제" 하루치(풀별, 6dec 절삭) ====
+
+    /**
+     * @notice 특정 시점의 하루 시작 시각(자정)을 계산하는 내부 함수
+     * @param ts 기준 시각 (Unix timestamp)
+     * @return 해당 시점이 속한 하루의 시작 시각 (자정, UTC 00:00)
+     * @dev 
+     * - 베스팅 시작일 이전이면 vestingStartDate 반환
+     * - 베스팅 시작일 이후면 해당 시각이 속한 하루의 자정 시각 반환
+     * - SECONDS_PER_DAY(86400초) 단위로 정확한 하루 경계 계산
+     * - unchecked 블록으로 가스 최적화 (오버플로우 불가능)
+     */
+    function _dayStart(uint256 ts) internal view returns (uint256) {
+        if (ts <= vestingStartDate) {
+            return vestingStartDate;
+        }
+        unchecked {
+            return vestingStartDate + ((ts - vestingStartDate) / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+        }
+    }
+
+    /**
+     * @notice 구매자 풀 기준: 어제 하루 동안 벌어진 양(6dec, 절삭). 클레임/동기화와 무관.
+     * @param user 조회할 사용자 주소
+     * @return pay6 어제 하루 동안 벌어진 구매자 풀 보상 (6 decimals, 절삭)
+     * @dev 
+     * - 현재 시점을 기준으로 어제 하루의 보상만 계산
+     * - 베스팅 시작일 이전이면 0 반환
+     * - _previewBuyerPendingAt으로 어제 하루치 보상 계산 후 6dec 절삭
+     * - 실제 클레임이나 동기화와 무관한 순수 계산 함수
+     * - 실시간 대시보드나 UI 표시용으로 활용 가능
+     */
+    function previewBuyerEarnedYesterday(address user) external view returns (uint256 pay6) {
+        // 오늘 자정 시각 계산
+        uint256 todayStart = _dayStart(block.timestamp);
+        if (todayStart <= vestingStartDate) {
+            return 0;
+        }
+        // 어제 날짜 인덱스 계산 (오늘 - 1)
+        uint256 yIndex = ((todayStart - vestingStartDate) / SECONDS_PER_DAY) - 1;
+        // 어제 하루치 보상 계산 (18 decimals)
+        uint256 amount = _previewBuyerPendingAt(user, yIndex, yIndex);
+        // 6 decimals로 절삭하여 반환
+        return _applyFloor6(amount);
+    }
+
+    /**
+     * @notice 추천인 풀 기준: 어제 하루 동안 벌어진 양(6dec, 절삭). 클레임/동기화와 무관.
+     * @param user 조회할 추천인 주소
+     * @return pay6 어제 하루 동안 벌어진 추천인 풀 보상 (6 decimals, 절삭)
+     * @dev 
+     * - 현재 시점을 기준으로 어제 하루의 레퍼럴 보상만 계산
+     * - 베스팅 시작일 이전이면 0 반환
+     * - _previewRefPendingAt으로 어제 하루치 레퍼럴 보상 계산 후 6dec 절삭
+     * - 실제 클레임이나 동기화와 무관한 순수 계산 함수
+     * - 실시간 대시보드나 UI 표시용으로 활용 가능
+     */
+    function previewReferrerEarnedYesterday(address user) external view returns (uint256 pay6) {
+        // 오늘 자정 시각 계산
+        uint256 todayStart = _dayStart(block.timestamp);
+        if (todayStart <= vestingStartDate) {
+            return 0;
+        }
+        // 어제 날짜 인덱스 계산 (오늘 - 1)
+        uint256 yIndex = ((todayStart - vestingStartDate) / SECONDS_PER_DAY) - 1;
+        // 어제 하루치 레퍼럴 보상 계산 (18 decimals)
+        uint256 amount = _previewRefPendingAt(user, yIndex, yIndex);
+        // 6 decimals로 절삭하여 반환
+        return _applyFloor6(amount);
     }
 }

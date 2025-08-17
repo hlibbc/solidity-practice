@@ -1,0 +1,21 @@
+// scripts/previewReferrerClaimable.js
+require("dotenv").config();
+const { pickAddressArg, attachVestingWithEthers, ethers } = require("./_shared");
+
+function floor6(x) { const mod = 10n ** 12n; return x - (x % mod); }
+
+async function main() {
+  const user = pickAddressArg();
+  const { d, vesting } = await attachVestingWithEthers();
+
+  const ref18 = await vesting.previewReferrerClaimable(user);
+
+  console.log("=== Referrer Claimable (now) ===");
+  console.log("Network  :", d.network?.name || process.env.HARDHAT_NETWORK || "unknown");
+  console.log("Vesting  :", d.vesting);             // ⬅ 여기!
+  console.log("User     :", user);
+  console.log("amount18 :", ref18.toString());
+  console.log("floor6→18:", floor6(ref18).toString(), `(≈ ${ethers.formatUnits(floor6(ref18), 18)})`);
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });

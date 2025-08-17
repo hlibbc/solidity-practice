@@ -16,5 +16,6 @@ node_modules/
 **/foundry/out/
 **/foundry/cache/
 **/lib/
-/projects/token-vesting/test/data/purchase_history.csv
-/projects/token-vesting/test/data/user.csv
+
+# Ignore Temporary files (for testing)
+**/*.csv

@@ -1,0 +1,8 @@
+# 01_basic-arithmetic/.gitignore
+build/
+cache/
+artifacts/
+pot12_0000.ptau
+pot12_0001.ptau
+pot12_final.ptau
+*.zkey

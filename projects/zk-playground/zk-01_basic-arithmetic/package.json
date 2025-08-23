@@ -2,6 +2,7 @@
   "name": "zk-01_basic-arithmetic",
   "version": "1.0.0",
   "scripts": {
+    "build": "bash scripts/build.sh",
     "compile": "hardhat compile",
     "test": "hardhat test",
     "deploy": "hardhat run scripts/deploy.js"

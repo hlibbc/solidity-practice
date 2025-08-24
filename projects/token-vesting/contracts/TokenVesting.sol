@@ -536,12 +536,12 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
 
         // 1) 스토리지 반영 - 일별 데이터 업데이트
         boxesAddedPerDay[d] += boxCount;
-        _pushBuyerCheckpoint(buyer, d + 1, boxCount);
+        _pushBuyerCheckpoint(buyer, d, boxCount);
 
         uint256 buyback = 0;
         if (referrer != address(0)) {
             referralsAddedPerDay[d] += boxCount;
-            _pushRefCheckpoint(referrer, d + 1, boxCount);
+            _pushRefCheckpoint(referrer, d, boxCount);
 
             if (creditBuyback && paidUnits > 0) {
                 buyback = (paidUnits * BUYBACK_PERCENT) / 100;
@@ -621,8 +621,8 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         boxesAddedPerDay[dToday]     += boxCount;
         referralsAddedPerDay[dToday] += boxCount;
 
-        _pushBuyerCheckpoint(msg.sender, dToday + 1, boxCount);
-        _pushRefCheckpoint(referrer, dToday + 1, boxCount);
+        _pushBuyerCheckpoint(msg.sender, dToday, boxCount);
+        _pushRefCheckpoint(referrer, dToday, boxCount);
         _ensureReferralCode(msg.sender);
 
         emit BoxesPurchased(msg.sender, boxCount, referrer, cost, buyback, normCode);
@@ -681,44 +681,51 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * - 일별 데이터와 누적 데이터 모두 업데이트
      */
     function _syncOneDay() internal {
+        // [d]일의 자정(UTC 00:00) 타임스탬프
         uint256 dayStart = nextSyncTs;
         uint256 d = (dayStart - vestingStartDate) / SECONDS_PER_DAY;
 
-        // 전일까지의 누적 보유량을 분모로 사용 (당일 추가분은 제외)
-        uint256 boxesDenom    = d == 0 ? 0 : cumBoxes[d - 1];
-        uint256 referralDenom = d == 0 ? 0 : cumReferals[d - 1];
+        // ── 분모(denominator) 계산
+        // 기본: 전일까지의 누적(cum[d-1])을 분모로 사용
+        // 예외: 첫날(d==0)은 전일이 없으므로 "당일 추가분까지" 포함하여 분모 산정
+        uint256 prevBoxes = (d == 0) ? 0 : cumBoxes[d - 1];
+        uint256 prevRefs  = (d == 0) ? 0 : cumReferals[d - 1];
 
-        uint256 perBox = 0;
-        uint256 perRef = 0;
+        uint256 boxesDenom    = (d == 0) ? (prevBoxes + boxesAddedPerDay[0])        : prevBoxes;
+        uint256 referralDenom = (d == 0) ? (prevRefs  + referralsAddedPerDay[0])     : prevRefs;
 
-        // 구매자 풀과 추천인 풀의 일일 보상 계산
+        // ── 해당 날짜의 일일 풀(18dec)
         uint256 buyerPool = _dailyPoolRawByTs(dayStart, true);
+        uint256 refPool   = _dailyPoolRawByTs(dayStart, false);
+
+        // ── 일일 단가(18dec)
+        uint256 perBox = 0;
         if (buyerPool > 0 && boxesDenom > 0) {
             perBox = buyerPool / boxesDenom;
         }
-
-        uint256 refPool = _dailyPoolRawByTs(dayStart, false);
+        uint256 perRef = 0;
         if (refPool > 0 && referralDenom > 0) {
             perRef = refPool / referralDenom;
         }
 
-        // 일별 보상과 누적 보상 업데이트
-        rewardPerBox[d] = perBox;
-        rewardPerReferal[d] = perRef;
-        cumRewardPerBox[d] = (d == 0 ? 0 : cumRewardPerBox[d - 1]) + perBox;
+        // ── 일별/누적 단가 기록
+        rewardPerBox[d]        = perBox;
+        rewardPerReferal[d]    = perRef;
+        cumRewardPerBox[d]     = (d == 0 ? 0 : cumRewardPerBox[d - 1]) + perBox;
         cumRewardPerRefUnit[d] = (d == 0 ? 0 : cumRewardPerRefUnit[d - 1]) + perRef;
 
-        // 누적 보유량 업데이트
-        uint256 prevBoxes = d == 0 ? 0 : cumBoxes[d - 1];
-        uint256 prevRefs = d == 0 ? 0 : cumReferals[d - 1];
-        cumBoxes[d] = prevBoxes + boxesAddedPerDay[d];
+        // ── 누적 수량 갱신(오늘 추가분 반영)
+        cumBoxes[d]    = prevBoxes + boxesAddedPerDay[d];
         cumReferals[d] = prevRefs  + referralsAddedPerDay[d];
 
+        // ── 이벤트
         emit DailySynced(d, perBox, perRef, boxesDenom, referralDenom);
 
-        // 다음 동기화 시점과 확정된 일수 업데이트
-        nextSyncTs += SECONDS_PER_DAY;
-        lastSyncedDay = d + 1;
+        // ── 다음 날로 진행
+        unchecked {
+            nextSyncTs += SECONDS_PER_DAY;
+            lastSyncedDay = d + 1; // "확정 완료한 총 일수"
+        }
     }
 
     /**
@@ -819,6 +826,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * @param user 보상을 조회할 사용자 주소
      * @return 클레임 가능한 총 보상량 (18 decimals)
      * @dev 현재 블록 타임스탬프를 기준으로 시뮬레이션
+     * 호출전에 반드시 sync() 호출되어 있어야 함
      */
     function previewBuyerClaimable(address user) external view returns (uint256) {
         return _previewBuyerClaimableAtTs(user, block.timestamp);
@@ -840,6 +848,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * @param ts 기준 시각 (Unix timestamp)
      * @return 클레임 가능한 총 보상량 (18 decimals)
      * @dev 지정된 타임스탬프까지의 보상을 시뮬레이션
+     * 호출전에 반드시 sync() 호출되어 있어야 함
      */
     function previewBuyerClaimableAt(address user, uint256 ts) external view returns (uint256) {
         return _previewBuyerClaimableAtTs(user, ts);
@@ -875,12 +884,12 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         return poolEndTimes[y]; // inclusive
     }
 
-    /// @notice 해당 연차의 ‘일수’ (inclusive)
+    /// @notice 해당 연차의 ‘일수’ (exclusive)
     function _termDays(uint256 y) internal view returns (uint256) {
         uint256 s = _yearStartTs(y);
         uint256 e = _yearEndTs(y);
-        // e는 항상 s 이후이고, e가 inclusive이므로 +1
-        return ((e - s) / SECONDS_PER_DAY) + 1;
+        // e는 항상 s 이후이고, e가 exclusive (inclusive일 경우 +1 해야 함)
+        return ((e - s) / SECONDS_PER_DAY);
     }
 
     function _yearByTs(uint256 dayStartTs) internal view returns (uint256) {
@@ -1192,7 +1201,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
                 }
             }
             // 분모: 항상 "전일까지의 누적 박스 수"
-            uint256 denom = prevBoxes;
+            uint256 denom = (d == 0) ? (prevBoxes + boxesAddedPerDay[0]) : prevBoxes;
 
             if (denom > 0 && curBal > 0) {
                 // 해당 날짜(day d)의 자정 타임스탬프
@@ -1240,7 +1249,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
 
         for (uint256 d = startSim; d <= endSim; d++) {
             while (i < n && hist[i].day <= d) { curBal = hist[i].amount; unchecked { i++; } }
-            uint256 denom = prevRefs;
+            uint256 denom = (d == 0) ? (prevRefs + referralsAddedPerDay[0]) : prevRefs;
             if (denom > 0 && curBal > 0) {
                 uint256 dayStartTs = vestingStartDate + d * SECONDS_PER_DAY;
                 uint256 pool = _dailyPoolRawByTs(dayStartTs, false);

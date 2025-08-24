@@ -12,13 +12,15 @@ const fs = require("fs");
 const path = require("path");
 
 // ===== 고정 파라미터 =====
-// 베스팅 시작: 2025-06-03 00:00:00 UTC
-const START_TS = 1748736000n;
-// 조회 시점: 2025-08-08 15:00:00 KST = 2025-08-08 06:00:00 UTC
-const QUERY_TS = 1754632800n;
+// 베스팅 시작: 2025-06-02 00:00:00 UTC
+const START_TS = 1748822400n;
+// const QUERY_TS = 1748919600n; // 조회 시점: 2025-06-03 03:00:00 UTC
+const QUERY_TS = 1749006000n; // 조회 시점: 2025-06-04 03:00:00 UTC
+// 조회 시점: 2025-08-08 06:00:00 UTC
+// const QUERY_TS = 1754460000n;
 // const QUERY_TS = 1754784000n; // (참고) KST 8/9 하루까지 전부 포함하고 싶을 때는 2025-08-10 00:00:00 UTC
 // 대상 주소
-const TARGET = "0xC5C3a14f8cDAC2300cB4Cd779046491B30c750B8";
+const TARGET = "0x5f4A63A539C1cA7ed42000F8223719ce5AA3285f";
 
 // ===== CSV 유틸 =====
 /**
@@ -193,13 +195,13 @@ function floor6(amount18n){
  */
 describe("adhoc.claimable.at", function () {
   /**
-   * @test 2025-08-08 15:00 KST 시점의 purchase/referral 클레임 가능액 조회
+   * @test 2025-06-03 3:00 KST 시점의 purchase/referral 클레임 가능액 조회
    * @description 
    * - CSV 데이터를 기반으로 실제 구매 이력을 시뮬레이션
    * - 특정 시점에서의 클레임 가능한 보상 계산
    * - 보유량, 경과 일수 등 상세 정보 출력
    */
-  it("2025-08-08 15:00 KST 시점의 purchase/referral 클레임 가능액 조회", async () => {
+  it("2025-08-08 03:00 KST 시점의 purchase/referral 클레임 가능액 조회", async () => {
     const [owner] = await ethers.getSigners();
 
     // 1) 컨트랙트 배포 (시작시각 고정)
@@ -291,6 +293,15 @@ describe("adhoc.claimable.at", function () {
       );
     }
 
+    const fullyElapsedDays = Number((QUERY_TS - START_TS) / DAY); // 여기선 1
+    console.log('fullyElapsedDays = ', fullyElapsedDays)
+
+    // 3) backfillPurchaseAt 루프가 끝난 직후에 추가
+    await vesting.syncLimitDay(fullyElapsedDays);
+
+    const perBox0 = await vesting.rewardPerBox(0);
+    console.log('day0 per-box =', ethers.formatUnits(perBox0, 18));
+
     // 4) 특정 주소의 해당 시점(QUERY_TS) claimable 조회
     const target = ethers.getAddress(TARGET);
 
@@ -309,7 +320,7 @@ describe("adhoc.claimable.at", function () {
     const buyerBoxesByDay = await vesting.buyerBoxesAtDay(target, dayIndex);
     const referUnitsByDay = await vesting.referralUnitsAtDay(target, dayIndex);
 
-    console.log("\n=== Balances @ 2025-08-08 15:00 KST ===");
+    console.log("\n=== Balances @ 2025-08-08 06:00 UTC ===");
     console.log("Address:", target);
     console.log("day index (global from START_TS):", dayIndex.toString());
     console.log("buyer boxes:", buyerBoxesByDay.toString());
@@ -341,11 +352,14 @@ describe("adhoc.claimable.at", function () {
     }
 
     // 기존 출력: 클레임 가능한 보상 정보
-    console.log("=== Claimable @ 2025-08-08 15:00 KST ===");
+    console.log("=== Claimable @ 2025-08-08 06:00 UTC ===");
     console.log("purchase (18dec):", purch18.toString());
     console.log("purchase (floor6->18dec):", purchPay.toString(), "(~", ethers.formatUnits(purchPay, 18), ")");
     console.log("referral  (18dec):", refer18.toString());
     console.log("referral  (floor6->18dec):", referPay.toString(), "(~", ethers.formatUnits(referPay, 18), ")\n");
+    console.log("termDays", Number((ends[0]-START_TS)/DAY + 1n));
+    console.log("boxesAddedPerDay[0]", (await vesting.boxesAddedPerDay(0n)).toString());
+    console.log("cumBoxes ", (await vesting.cumBoxes(fullyElapsedDays-1)).toString());
 
     // Sanity check: 반환값이 BigInt인지 확인
     expect(purch18).to.be.a("bigint");

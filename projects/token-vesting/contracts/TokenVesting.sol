@@ -121,6 +121,13 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     mapping(address => uint256) public buybackUSDT; // 즉시 청구 가능한 StableCoin 바이백 잔액 (10% 수수료)
 
     /**
+     * @notice 박스 가격 관련 정보 관리
+     * @dev 
+     * - discount 레퍼럴 => discountRate 매핑
+     */
+    mapping (bytes8 => uint256) public refDiscountOf; // 레퍼럴코드 별 discount Rate 관리
+
+    /**
      * @notice BadgeSBT 관련 정보
      * @dev
      * - badgeSBT: BadgeSBT 컨트랙트 주소 (SBT 토큰 민팅 및 업그레이드용)
@@ -603,6 +610,8 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         (address referrer, bytes8 normCode) = _referrerFromString(refCodeStr);
         require(referrer != msg.sender, "self referral");
 
+        p.value;
+
         sync();
 
         uint256 cost = 0; // BOX_PRICE_UNITS * boxCount;
@@ -822,6 +831,123 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     }
 
     /**
+     * @notice 구매한 총 박스 수 읽어오기
+     * @dev sync가 호출되지 않은 최초 구간일 경우, boxesAddedPerDay[0] 반환
+     * @return 구매한 총 박스 수
+     */
+    function getTotalBoxPurchased() public view returns (uint256) {
+        if (lastSyncedDay == 0) {
+            // 아직 아무 날도 확정되지 않은 초기 구간
+            return boxesAddedPerDay[0];
+        }
+        uint256 finalized = cumBoxes[lastSyncedDay - 1];        // 어제까지 확정 누적
+        uint256 today = boxesAddedPerDay[lastSyncedDay];        // 오늘 미확정 누적
+        return finalized + today;
+    }
+
+    /**
+     * @notice 현재 시점 기준 1박스 구매 가격 조회 (할인율 적용)
+     * @param refCodeStr 8자리 레퍼럴 코드 문자열
+     * @return price 할인율이 적용된 1박스 구매 가격 (USDT 6 decimals)
+     * @dev 
+     * - 레퍼럴 코드의 유효성을 검증하고 해당 코드의 할인율 적용
+     * - 유효하지 않은 레퍼럴 코드인 경우 0 반환
+     * - 1박스 기준으로 가격 계산하여 반환
+     */
+    function getCurrentBoxPrice(
+        string calldata refCodeStr 
+    ) external view returns (uint256 price) {
+        bytes8  code = _normalizeToBytes8(refCodeStr);
+        if (codeToOwner[code] == address(0)) {
+            return 0;
+        }
+        uint256 discountRate = refDiscountOf[code];
+        price = _calculatePurchasePrice(1, discountRate);
+    }
+
+    /**
+     * @notice 지정된 수량의 박스 구매 시 예상 총 금액 조회 (할인율 적용)
+     * @param boxAmount 구매할 박스 수량
+     * @param refCodeStr 8자리 레퍼럴 코드 문자열
+     * @return price 할인율이 적용된 총 구매 금액 (USDT 6 decimals)
+     * @dev 
+     * - 레퍼럴 코드의 유효성을 검증하고 해당 코드의 할인율 적용
+     * - 유효하지 않은 레퍼럴 코드인 경우 0 반환
+     * - 수량별 단계별 가격 계산 후 할인율 적용하여 총 금액 반환
+     */
+    function estimatedTotalAmount(
+        uint256 boxAmount,
+        string calldata refCodeStr 
+    ) external view returns (uint256 price) {
+        bytes8  code = _normalizeToBytes8(refCodeStr);
+        if (codeToOwner[code] == address(0)) {
+            return 0;
+        }
+        uint256 discountRate = refDiscountOf[code];
+        price = _calculatePurchasePrice(boxAmount, discountRate);
+    }
+
+    /**
+     * @notice 박스 구매 가격 계산 - 단계별 가격 정책 적용
+     * @param quantity 구매할 박스 수량
+     * @param _discountRate 적용할 할인율 (0-100, 10이면 10% 할인)
+     * @return totalPrice 할인이 적용된 총 구매 금액 (USDT 6 decimals)
+     * @dev 
+     * - 200개 단위로 25 USDT씩 인상되는 단계별 가격 정책
+     * - 0~2999: 350 USDT, 3000~3199: 350 USDT, 3200~3399: 375 USDT
+     * - ... 9800~9999: 1200 USDT, 10000 이상: 1300 USDT (고정)
+     * - 수량이 여러 단계에 걸쳐 있는 경우 각 단계별로 계산 후 합산
+     * - 최종 가격에 할인율 적용하여 반환
+     */
+    function _calculatePurchasePrice(
+        uint256 quantity,
+        uint256 _discountRate
+    ) internal view returns (uint256 totalPrice) {
+        uint256 sold = getTotalBoxPurchased();
+        uint256 idx = sold + 1;  // 첫 구매 인덱스(1-based)
+        uint256 remain = quantity;
+
+        // 상수들 (USDT 6 decimals)
+        uint256 basePrice = 350e6; // 시작가
+        uint256 stepAmount = 25e6; // 스텝당 +$25
+        uint256 stepUnits = 200; // 200개 단위
+        uint256 hardCap = 10000; // 10000 초과부터 1300
+        uint256 capPrice = 1300e6; // 1300 USDT
+
+        uint256 sum = 0;
+
+        while (remain != 0) {
+            // 10000 초과 구간은 전부 1300 고정
+            if (idx >= hardCap) {
+                sum += capPrice * remain;
+                break;
+            }
+            // 현재 idx가 속한 스텝 계산 (3000 이하는 step = 0)
+            uint256 step = idx <= 3000 ? 0 : (idx - 3000) / stepUnits;
+            // 해당 스텝의 단가
+            uint256 unit = basePrice + stepAmount * step;
+
+            // 해당 스텝의 마지막 인덱스(상한 9999)
+            uint256 boundaryEnd = 3199 + step * stepUnits; // 3000~3199: step=0
+            if (boundaryEnd > 9999) {
+                boundaryEnd = 9999;
+            }
+            // 이번 스텝에서 소화 가능한 개수
+            uint256 canBuy = boundaryEnd + 1 - idx;
+            if (canBuy > remain) {
+                canBuy = remain;
+            }
+            sum += unit * canBuy;
+            // 다음 구간으로 이동
+            idx += canBuy;
+            remain -= canBuy;
+        }
+        // 할인 적용 (예: _discountRate=10 → 10% 할인)
+        uint256 discount = 100 - _discountRate;
+        totalPrice = sum * discount / 100;
+    }
+
+    /**
      * @notice 현재 시점 기준 구매자 클레임 가능한 보상 미리보기
      * @param user 보상을 조회할 사용자 주소
      * @return 클레임 가능한 총 보상량 (18 decimals)
@@ -830,16 +956,6 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      */
     function previewBuyerClaimable(address user) external view returns (uint256) {
         return _previewBuyerClaimableAtTs(user, block.timestamp);
-    }
-
-    /**
-     * @notice 현재 시점 기준 추천인 클레임 가능한 보상 미리보기
-     * @param user 보상을 조회할 추천인 주소
-     * @return 클레임 가능한 총 보상량 (18 decimals)
-     * @dev 현재 블록 타임스탬프를 기준으로 시뮬레이션
-     */
-    function previewReferrerClaimable(address user) external view returns (uint256) {
-        return _previewReferrerClaimableAtTs(user, block.timestamp);
     }
 
     /**
@@ -855,6 +971,41 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     }
 
     /**
+     * @notice 특정 시점 기준 구매자 클레임 가능한 보상 미리보기 - 내부 계산
+     * @param user 보상을 조회할 사용자 주소
+     * @param ts 기준 시각 (Unix timestamp)
+     * @return total 클레임 가능한 총 보상량 (18 decimals)
+     * @dev 
+     * - 확정된 보상과 미확정 보상을 모두 계산하여 총 클레임 가능량 반환
+     * - 확정된 보상: _calcByHistory로 체크포인트 기반 계산
+     * - 미확정 보상: _previewBuyerPendingAt으로 시뮬레이션
+     */
+    function _previewBuyerClaimableAtTs(address user, uint256 ts) internal view returns (uint256) {
+        (uint256 fromDay0, uint256 toDay0) = _claimWindow(lastBuyerClaimedDay[user]);
+        (uint256 previewLast,) = _previewLastFinalAt(ts);
+
+        uint256 total = 0;
+        if (fromDay0 <= toDay0) {
+            total += _calcByHistory(buyerBoxAmountHistory[user], cumRewardPerBox, fromDay0, toDay0);
+        }
+        uint256 startSim = fromDay0 > lastSyncedDay ? fromDay0 : lastSyncedDay;
+        if (startSim <= previewLast) {
+            total += _previewBuyerPendingAt(user, startSim, previewLast);
+        }
+        return total;
+    }
+
+    /**
+     * @notice 현재 시점 기준 추천인 클레임 가능한 보상 미리보기
+     * @param user 보상을 조회할 추천인 주소
+     * @return 클레임 가능한 총 보상량 (18 decimals)
+     * @dev 현재 블록 타임스탬프를 기준으로 시뮬레이션
+     */
+    function previewReferrerClaimable(address user) external view returns (uint256) {
+        return _previewReferrerClaimableAtTs(user, block.timestamp);
+    }
+    
+    /**
      * @notice 특정 시점 기준 추천인 클레임 가능한 보상 미리보기
      * @param user 보상을 조회할 추천인 주소
      * @param ts 기준 시각 (Unix timestamp)
@@ -863,6 +1014,31 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      */
     function previewReferrerClaimableAt(address user, uint256 ts) external view returns (uint256) {
         return _previewReferrerClaimableAtTs(user, ts);
+    }
+
+    /**
+     * @notice 특정 시점 기준 추천인 클레임 가능한 보상 미리보기 - 내부 계산
+     * @param user 보상을 조회할 추천인 주소
+     * @param ts 기준 시각 (Unix timestamp)
+     * @return total 클레임 가능한 총 보상량 (18 decimals)
+     * @dev 
+     * - 확정된 보상과 미확정 보상을 모두 계산하여 총 클레임 가능량 반환
+     * - 확정된 보상: _calcByHistory로 체크포인트 기반 계산
+     * - 미확정 보상: _previewRefPendingAt으로 시뮬레이션
+     */
+    function _previewReferrerClaimableAtTs(address user, uint256 ts) internal view returns (uint256) {
+        (uint256 fromDay0, uint256 toDay0) = _claimWindow(lastRefClaimedDay[user]);
+        (uint256 previewLast,) = _previewLastFinalAt(ts);
+
+        uint256 total = 0;
+        if (fromDay0 <= toDay0) {
+            total += _calcByHistory(referralAmountHistory[user], cumRewardPerRefUnit, fromDay0, toDay0);
+        }
+        uint256 startSim = fromDay0 > lastSyncedDay ? fromDay0 : lastSyncedDay;
+        if (startSim <= previewLast) {
+            total += _previewRefPendingAt(user, startSim, previewLast);
+        }
+        return total;
     }
 
     /**
@@ -892,6 +1068,13 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         return ((e - s) / SECONDS_PER_DAY);
     }
 
+    /**
+     * @notice 특정 시각이 속한 연차 인덱스 조회
+     * @param dayStartTs 기준 시각 (Unix timestamp)
+     * @return 해당 시각이 속한 연차 인덱스 (0부터 시작)
+     * @dev poolEndTimes 배열을 순회하며 해당 시각이 속한 연차를 찾음
+     *      스케줄을 벗어난 경우 배열 길이 반환
+     */
     function _yearByTs(uint256 dayStartTs) internal view returns (uint256) {
         uint256 n = poolEndTimes.length;
         for (uint256 i = 0; i < n; i++) {
@@ -1076,56 +1259,6 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     }
 
     /**
-     * @notice 특정 시점 기준 구매자 클레임 가능한 보상 미리보기 - 내부 계산
-     * @param user 보상을 조회할 사용자 주소
-     * @param ts 기준 시각 (Unix timestamp)
-     * @return total 클레임 가능한 총 보상량 (18 decimals)
-     * @dev 
-     * - 확정된 보상과 미확정 보상을 모두 계산하여 총 클레임 가능량 반환
-     * - 확정된 보상: _calcByHistory로 체크포인트 기반 계산
-     * - 미확정 보상: _previewBuyerPendingAt으로 시뮬레이션
-     */
-    function _previewBuyerClaimableAtTs(address user, uint256 ts) internal view returns (uint256) {
-        (uint256 fromDay0, uint256 toDay0) = _claimWindow(lastBuyerClaimedDay[user]);
-        (uint256 previewLast,) = _previewLastFinalAt(ts);
-
-        uint256 total = 0;
-        if (fromDay0 <= toDay0) {
-            total += _calcByHistory(buyerBoxAmountHistory[user], cumRewardPerBox, fromDay0, toDay0);
-        }
-        uint256 startSim = fromDay0 > lastSyncedDay ? fromDay0 : lastSyncedDay;
-        if (startSim <= previewLast) {
-            total += _previewBuyerPendingAt(user, startSim, previewLast);
-        }
-        return total;
-    }
-
-    /**
-     * @notice 특정 시점 기준 추천인 클레임 가능한 보상 미리보기 - 내부 계산
-     * @param user 보상을 조회할 추천인 주소
-     * @param ts 기준 시각 (Unix timestamp)
-     * @return total 클레임 가능한 총 보상량 (18 decimals)
-     * @dev 
-     * - 확정된 보상과 미확정 보상을 모두 계산하여 총 클레임 가능량 반환
-     * - 확정된 보상: _calcByHistory로 체크포인트 기반 계산
-     * - 미확정 보상: _previewRefPendingAt으로 시뮬레이션
-     */
-    function _previewReferrerClaimableAtTs(address user, uint256 ts) internal view returns (uint256) {
-        (uint256 fromDay0, uint256 toDay0) = _claimWindow(lastRefClaimedDay[user]);
-        (uint256 previewLast,) = _previewLastFinalAt(ts);
-
-        uint256 total = 0;
-        if (fromDay0 <= toDay0) {
-            total += _calcByHistory(referralAmountHistory[user], cumRewardPerRefUnit, fromDay0, toDay0);
-        }
-        uint256 startSim = fromDay0 > lastSyncedDay ? fromDay0 : lastSyncedDay;
-        if (startSim <= previewLast) {
-            total += _previewRefPendingAt(user, startSim, previewLast);
-        }
-        return total;
-    }
-
-    /**
      * @notice ts 시점에 sync()를 가정한 “예상 확정 범위”를 계산한다.
      * @dev lastSyncedDay(d)와 nextSyncTs를 기준으로, ts까지 경과한 ‘완전한 하루(UTC 00:00 경계)’를 deltaDays로 산출함.
      * @param ts 기준 시각(Unix epoch sec)
@@ -1296,13 +1429,21 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         uint256 fromDay,
         uint256 toDay
     ) internal view returns (uint256 total) {
-        if (fromDay > toDay) return 0;
+        if (fromDay > toDay) {
+            return 0;
+        }
         uint256 n = hist.length;
-        if (n == 0) return 0;
-
+        if (n == 0) {
+            return 0;
+        }
         uint256 i = 0;
         uint256 curBal = 0;
-        while (i < n && hist[i].day <= fromDay) { curBal = hist[i].amount; unchecked { i++; } }
+        while (i < n && hist[i].day <= fromDay) {
+            curBal = hist[i].amount; 
+            unchecked { 
+                i++; 
+            } 
+        }
 
         uint256 segStart = fromDay;
         uint256 nextDay = (i < n) ? hist[i].day : (toDay + 1);
@@ -1315,7 +1456,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         while (i < n && hist[i].day <= toDay) {
             curBal  = hist[i].amount;
             segStart = hist[i].day;
-            unchecked { i++; }
+            unchecked {
+                i++; 
+            }
             nextDay = (i < n) ? hist[i].day : (toDay + 1);
             segEnd  = nextDay > 0 ? toDay.min(nextDay - 1) : toDay;
 
@@ -1375,7 +1518,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      */
     function _balanceAtDay(BoxAmountCheckpoint[] storage hist, uint256 day) internal view returns (uint256) {
         uint256 n = hist.length;
-        if (n == 0) return 0;
+        if (n == 0) {
+            return 0;
+        }
         uint256 i = 0;
         uint256 cur = 0;
         while (i < n && hist[i].day <= day) {
@@ -1412,6 +1557,24 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      */
     function referralUnitsAtDay(address user, uint256 day) external view returns (uint256) {
         return _balanceAtDay(referralAmountHistory[user], day);
+    }
+
+    /**
+     * @notice user가 보유한 박스수량을 반환한다.
+     * @return user가 보유한 박스수량
+     */
+    function boxesOf(address user) external view returns (uint256) {
+        BoxAmountCheckpoint[] storage hist = buyerBoxAmountHistory[user];
+        return hist.length == 0 ? 0 : hist[hist.length - 1].amount;
+    }
+
+    /**
+     * @notice user의 레퍼럴로 구매한 박스수량을 반환한다.
+     * @return user의 레퍼럴로 구매한 박스수량
+     */
+    function referralsOf(address user) external view returns (uint256) {
+        BoxAmountCheckpoint[] storage hist = referralAmountHistory[user];
+        return hist.length == 0 ? 0 : hist[hist.length - 1].amount;
     }
 
     /**

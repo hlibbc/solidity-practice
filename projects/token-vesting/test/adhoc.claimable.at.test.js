@@ -14,8 +14,8 @@ const path = require("path");
 // ===== 고정 파라미터 =====
 // 베스팅 시작: 2025-06-02 00:00:00 UTC
 const START_TS = 1748822400n;
-// const QUERY_TS = 1748919600n; // 조회 시점: 2025-06-03 03:00:00 UTC
-const QUERY_TS = 1749006000n; // 조회 시점: 2025-06-04 03:00:00 UTC
+const QUERY_TS = 1748919600n; // 조회 시점: 2025-06-03 03:00:00 UTC
+// const QUERY_TS = 1749006000n; // 조회 시점: 2025-06-04 03:00:00 UTC
 // 조회 시점: 2025-08-08 06:00:00 UTC
 // const QUERY_TS = 1754460000n;
 // const QUERY_TS = 1754784000n; // (참고) KST 8/9 하루까지 전부 포함하고 싶을 때는 2025-08-10 00:00:00 UTC
@@ -80,14 +80,15 @@ function parsePurchasesCsv(csvText) {
   let start=0;
   const idx = {
     wallet: header.findIndex(h=>["wallet_address"].includes(h)),
-    ref:    header.findIndex(h=>["referral"].includes(h)),
+    ref:    header.findIndex(h=>["referral", "referral_code"].includes(h)),
     amount: header.findIndex(h=>["amount"].includes(h)),
-    price:  header.findIndex(h=>["avg_price"].includes(h)),
+    // price:  header.findIndex(h=>["avg_price"].includes(h)),
     time:   header.findIndex(h=>["updated_at"].includes(h)),
   };
   const hasHeader = Object.values(idx).some(i=>i!==-1);
   if (hasHeader) {
-    if (idx.wallet<0 || idx.amount<0 || idx.price<0 || idx.time<0) throw new Error("purchase_history.csv header not recognized");
+    // if (idx.wallet<0 || idx.amount<0 || idx.price<0 || idx.time<0) throw new Error("purchase_history.csv header not recognized");
+    if (idx.wallet<0 || idx.time<0) throw new Error("purchase_history.csv header not recognized");
     start=1;
   } else {
     idx.wallet=0; idx.ref=1; idx.amount=2; idx.price=3; idx.time=4;
@@ -96,7 +97,8 @@ function parsePurchasesCsv(csvText) {
   for (let i=start;i<lines.length;i++){
     const cols = lines[i].split(",").map(s=>s.trim());
     const g = k => (idx[k] >=0 && idx[k] < cols.length) ? cols[idx[k]] : "";
-    const wallet = g("wallet"), ref=g("ref"), amount=g("amount"), price=g("price"), time=g("time");
+    // const wallet = g("wallet"), ref=g("ref"), amount=g("amount"), price=g("price"), time=g("time");
+    const wallet = g("wallet"), ref=g("ref"), amount=g("amount"), price="300", time=g("time");
     if (wallet && amount && price && time) rows.push({ wallet, ref, amount, price, time });
   }
   return rows;
@@ -280,6 +282,10 @@ describe("adhoc.claimable.at", function () {
       const buyer = ethers.getAddress(row.wallet);
       const refCodeStr = normCodeMaybeEmpty(row.ref);
       const boxCount = parseBoxCount(row.amount);
+      if (boxCount === 0n) {
+        console.warn(`[skip] row#${row.wallet} amount=0 -> backfill 생략`, row);
+        continue;
+      }
       const paidUnits = boxCount * parseUsdt6(row.price);
       const purchaseTs = parseEpochSec(row.time);
 

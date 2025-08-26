@@ -24,7 +24,7 @@ describe("vesting.backfill", function () {
    * - d=0일의 rewardPerBox는 0이 되고, cumBoxes는 백필된 박스 수로 설정되는지 검증
    * - 분모(denominator)는 d=1부터 반영되어 보상 계산에 사용되는지 확인
    */
-  it("start 이전 ts → d=0 기록, 분모는 d=1부터 반영", async () => {
+  it("start 이전 ts → d=0 기록, 분모는 d=0부터 반영", async () => {
     const { vesting, buyer, start, ONE_USDT, DAY, increaseTime } = await deployFixture();
 
     // 베스팅 시작일 10일 전의 구매 데이터 백필
@@ -40,14 +40,13 @@ describe("vesting.backfill", function () {
       )
     ).to.not.be.reverted;
 
-    // 아직 확정 전이므로 rewardPerBox[0]==0 예상 (sync 전이라 읽을 값은 0일 수 있음)
-    // 2일 후 시간을 진행하여 sync 가능하게 함
+    // 2일 경과 후 sync
     await increaseTime(DAY * 2n + 1n);
     await vesting.sync();
 
-    // d=0 확정: perBox[0]=0, cumBoxes[0]=5
-    // d=0일에는 분모가 0이므로 rewardPerBox[0] = 0
-    expect(await vesting.rewardPerBox(0n)).to.equal(0n);
+    // d=0 확정: 분모에 당일 누적 포함 → rewardPerBox[0] > 0
+    const day0PerBox = await vesting.rewardPerBox(0n);
+    expect(day0PerBox).to.be.gt(0n);
     // cumBoxes[0]는 백필된 5개 박스로 설정됨
     expect(await vesting.cumBoxes(0n)).to.equal(5n);
   });

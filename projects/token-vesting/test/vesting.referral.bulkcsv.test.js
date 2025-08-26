@@ -153,14 +153,14 @@ describe("vesting.referral.bulkcsv", function () {
       vesting.connect(owner).setReferralCodesBulk(users, codes, true)
     ).to.emit(vesting, "ReferralCodeAssigned"); // 여러 번 발생 가능 (사용자 수만큼)
 
-    // 4) 검증: myReferralCodeString / referralCodeOf / codeToOwner
+    // 4) 검증: getReferralCode / referralCodeOf / codeToOwner
     // 설정된 모든 사용자에 대해 양방향 매핑과 뷰 함수 검증
     for (let i = 0; i < users.length; i++) {
       const addr = users[i];
       const code = codes[i];                // normalized
 
-      // 문자열 뷰 확인: myReferralCodeString 함수가 올바른 코드 반환
-      const s = await vesting.myReferralCodeString(addr);
+      // 문자열 뷰 확인: getReferralCode 함수가 올바른 코드 반환
+      const s = await vesting.getReferralCode(addr);
       expect(s).to.equal(code);
 
       // 매핑 검증: referralCodeOf(addr) == bytes8(code)

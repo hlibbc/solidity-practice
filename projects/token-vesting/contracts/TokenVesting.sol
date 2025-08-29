@@ -1213,12 +1213,12 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         return poolEndTimes[y]; // inclusive
     }
 
-    /// @notice 해당 연차의 ‘일수’ (exclusive)
+    /// @notice 해당 연차의 ‘일수’ (inclusive)
     function _termDays(uint256 y) internal view returns (uint256) {
         uint256 s = _yearStartTs(y);
         uint256 e = _yearEndTs(y);
         // e는 항상 s 이후이고, e가 exclusive (inclusive일 경우 +1 해야 함)
-        return ((e - s) / SECONDS_PER_DAY);
+        return ((e - s) / SECONDS_PER_DAY) + 1;
     }
 
     /**

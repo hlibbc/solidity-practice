@@ -1,56 +1,119 @@
 // test/vesting.claim.test.js
 /**
- * @fileoverview TokenVesting 컨트랙트의 보상 클레임 기능 테스트
+ * @fileoverview 
+ *  TokenVesting 컨트랙트의 보상 클레임 기능 테스트
  * @description 
- * - 구매자 풀과 추천인 풀의 보상 클레임 기능 검증
- * - 클레임 가능한 보상이 없을 때의 에러 처리 검증
- * - 베스팅 토큰이 설정되지 않은 상태에서의 클레임 시도 처리
+ *  - 구매자 풀과 추천인 풀의 보상 클레임 기능 검증
+ *  - 클레임 가능한 보상이 없을 때의 에러 처리 검증
+ *  - 베스팅 토큰이 설정되지 않은 상태에서의 클레임 시도 처리
+ * 
+ * 테스트 목적:
+ *  - 보상 클레임 시스템의 정상 동작 검증
+ *  - 클레임 불가능한 상황에서의 적절한 에러 처리 확인
+ *  - 베스팅 토큰 설정과 클레임 기능의 연동 검증
+ *  - 시스템의 안전성과 사용자 경험 보장
+ * 
+ * 클레임 시스템 개요:
+ *  - 구매자 풀: 구매한 박스에 대한 베스팅 보상 클레임
+ *  - 추천인 풀: 레퍼럴을 통한 구매에 대한 수수료 보상 클레임
+ *  - 클레임 가능 여부는 lastSyncedDay와 베스팅 토큰 설정에 따라 결정
+ * 
+ * @author hlibbc
  */
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { deployFixture } = require("./helpers/vestingFixture");
 
+// =============================================================================
+// 베스팅 보상 클레임 기능 테스트 스위트
+// =============================================================================
+
 /**
  * @describe 베스팅 보상 클레임 기능 테스트
  * @description 
- * 1. 클레임 가능한 보상이 없을 때의 에러 처리 검증
- * 2. 구매자 풀과 추천인 풀 각각의 클레임 기능 테스트
- * 3. 베스팅 토큰 설정 후 클레임 시도 시 적절한 에러 발생 확인
+ *  1. 클레임 가능한 보상이 없을 때의 에러 처리 검증
+ *  2. 구매자 풀과 추천인 풀 각각의 클레임 기능 테스트
+ *  3. 베스팅 토큰 설정 후 클레임 시도 시 적절한 에러 발생 확인
+ * 
+ * 테스트 시나리오:
+ *  - 베스팅 토큰 설정 및 전송 준비
+ *  - 클레임 불가능한 상황에서의 에러 처리 검증
+ *  - 구매자 풀과 추천인 풀 각각의 에러 메시지 확인
+ * 
+ * 현재 테스트 범위:
+ *  - 에러 상황에 대한 검증 (클레임 불가능)
+ *  - 성공적인 클레임은 별도 Mock 토큰 배포 후 진행 권장
  */
 describe("vesting.claim", function () {
+    // =============================================================================
+    // 클레임 불가능 상황 에러 처리 테스트
+    // =============================================================================
 
-  /**
-   * @test claimPurchase/Referral: nothing to claim (lastSyncedDay==0) → revert
-   * @description 
-   * - 아직 베스팅이 시작되지 않았거나 동기화가 완료되지 않은 상태에서 클레임 시도 시 에러 발생 확인
-   * - 구매자 풀과 추천인 풀 모두 "nothing to claim" 에러 발생 검증
-   * - 베스팅 토큰이 설정되어 있어도 클레임 가능한 보상이 없으면 에러 발생
-   */
-  it("claimPurchase/Referral: nothing to claim (lastSyncedDay==0) → revert", async () => {
-    const { vesting, stableCoin, buyer, referrer } = await deployFixture();
+    /**
+     * @test claimPurchase/Referral: nothing to claim (lastSyncedDay==0) → revert
+     * @description 
+     *  - 아직 베스팅이 시작되지 않았거나 동기화가 완료되지 않은 상태에서 클레임 시도 시 에러 발생 확인
+     *  - 구매자 풀과 추천인 풀 모두 "nothing to claim" 에러 발생 검증
+     *  - 베스팅 토큰이 설정되어 있어도 클레임 가능한 보상이 없으면 에러 발생
+     * 
+     * 테스트 단계:
+     *  1. 베스팅 토큰 설정 및 전송 준비
+     *  2. 구매자 풀 보상 클레임 시도 및 에러 발생 확인
+     *  3. 추천인 풀 보상 클레임 시도 및 에러 발생 확인
+     * 
+     * 예상 결과:
+     *  - 구매자 풀 클레임 시 "nothing to claim" 에러 발생
+     *  - 추천인 풀 클레임 시 "nothing to claim" 에러 발생
+     *  - 베스팅 토큰이 설정되어 있어도 클레임 불가능
+     * 
+     * 에러 발생 이유:
+     *  - lastSyncedDay == 0: 아직 베스팅이 시작되지 않음
+     *  - 동기화가 완료되지 않아 클레임 가능한 보상이 확정되지 않음
+     *  - 베스팅 스케줄이 초기화되지 않음
+     */
+    it("claimPurchase/Referral: nothing to claim (lastSyncedDay==0) → revert", async () => {
+        // === 테스트 환경 설정 ===
+        const { vesting, stableCoin, buyer, referrer } = await deployFixture();
 
-    // vestingToken 설정만 해두면 됨(전송 전에 'nothing to claim'에서 멈춘다)
-    // 베스팅 토큰 주소를 설정하여 전송 준비 완료
-    await vesting.setVestingToken(await stableCoin.getAddress());
+        // === 베스팅 토큰 설정 및 전송 준비 ===
+        // vestingToken 설정만 해두면 됨(전송 전에 'nothing to claim'에서 멈춘다)
+        // 베스팅 토큰 주소를 설정하여 전송 준비 완료
+        // 이 단계에서 베스팅 토큰은 설정되었지만, 아직 클레임 가능한 보상이 없는 상태
+        await vesting.setVestingToken(await stableCoin.getAddress());
 
-    // 1) 구매자 풀 보상 클레임 시도 → "nothing to claim" 에러 발생
-    // 아직 베스팅이 시작되지 않았거나 동기화가 완료되지 않은 상태
-    await expect(vesting.connect(buyer).claimPurchaseReward())
-      .to.be.revertedWith("nothing to claim");
+        // === 1) 구매자 풀 보상 클레임 시도 → "nothing to claim" 에러 발생 ===
+        // 아직 베스팅이 시작되지 않았거나 동기화가 완료되지 않은 상태
+        // buyer가 구매한 박스에 대한 베스팅 보상을 클레임하려고 시도
+        await expect(vesting.connect(buyer).claimPurchaseReward())
+            .to.be.revertedWith("nothing to claim");
 
-    // 2) 추천인 풀 보상 클레임 시도 → "nothing to claim" 에러 발생
-    // 레퍼럴 보상도 아직 확정되지 않은 상태
-    await expect(vesting.connect(referrer).claimReferralReward())
-      .to.be.revertedWith("nothing to claim");
-  });
+        // === 2) 추천인 풀 보상 클레임 시도 → "nothing to claim" 에러 발생 ===
+        // 레퍼럴 보상도 아직 확정되지 않은 상태
+        // referrer가 레퍼럴을 통한 구매에 대한 수수료 보상을 클레임하려고 시도
+        await expect(vesting.connect(referrer).claimReferralReward())
+            .to.be.revertedWith("nothing to claim");
+    });
 
-  // (참고) 실제 성공 클레임 테스트는 vestingToken(18dec) 모의토큰을 배포/충전해서 진행 필요.
-  // 금액이 매우 크므로 별도 Mock(18dec mint) 추가 시 작성 권장.
-  // 
-  // 실제 클레임 성공 테스트를 위해서는:
-  // 1. 18 decimals를 가진 Mock 베스팅 토큰 배포
-  // 2. 컨트랙트에 충분한 토큰 충전
-  // 3. 구매 데이터 백필 및 동기화 완료
-  // 4. 클레임 가능한 보상이 있는 상태에서 클레임 실행
-  // 5. 토큰 전송 성공 및 이벤트 발생 확인
+    // =============================================================================
+    // 향후 테스트 확장 계획 및 참고사항
+    // =============================================================================
+
+    /**
+     * @notice 실제 성공적인 클레임 테스트를 위한 참고사항
+     * @description 
+     *  현재 테스트는 에러 상황에 대한 검증만 포함하고 있습니다.
+     *  성공적인 클레임 테스트를 위해서는 추가적인 설정이 필요합니다.
+     * 
+     * 실제 클레임 성공 테스트를 위해서는:
+     *  1. 18 decimals를 가진 Mock 베스팅 토큰 배포
+     *  2. 컨트랙트에 충분한 토큰 충전
+     *  3. 구매 데이터 백필 및 동기화 완료
+     *  4. 클레임 가능한 보상이 있는 상태에서 클레임 실행
+     *  5. 토큰 전송 성공 및 이벤트 발생 확인
+     * 
+     * 권장사항:
+     *  - 금액이 매우 크므로 별도 Mock(18dec mint) 추가 시 작성 권장
+     *  - Mock 베스팅 토큰을 사용하여 안전하고 예측 가능한 테스트 환경 구성
+     *  - 다양한 시나리오(부분 클레임, 전체 클레임, 연속 클레임 등) 테스트 고려
+     */
 });

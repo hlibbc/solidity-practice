@@ -1218,7 +1218,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         uint256 s = _yearStartTs(y);
         uint256 e = _yearEndTs(y);
         // e는 항상 s 이후이고, e가 exclusive (inclusive일 경우 +1 해야 함)
-        return ((e - s) / SECONDS_PER_DAY) + 1;
+        return ((e - s) / SECONDS_PER_DAY) + 1; // 기존 시스템: return 364;
     }
 
     /**

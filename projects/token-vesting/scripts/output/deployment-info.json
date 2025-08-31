@@ -7,9 +7,9 @@
   "forwarder": "0x0000000000000000000000000000000000000000",
   "startTs": "1748822400",
   "contracts": {
-    "stableCoin": "0x3CFDf9646dBC385E47DC07869626Ea36BE7bA3a2",
-    "badgeSBT": "0x9A213F53334279C128C37DA962E5472eCD90554f",
-    "tokenVesting": "0xC55a98C1b3B0942883bB37df9716bea42d7d5009",
+    "stableCoin": "0xD9d684546ED4c727B136503016E137822DD9b4D7",
+    "badgeSBT": "0x79b3f34855c3478Fa45f65344a3f5E3c7b94405c",
+    "tokenVesting": "0x7CA40e352B402C9800b3fedBFC63b6FE79B8Fc0B",
     "vestingToken": null
   },
   "schedule": {
@@ -32,6 +32,6 @@
       "0"
     ]
   },
-  "time": "2025-08-29T02:17:58.376Z",
-  "blockNumber": 3761
+  "time": "2025-08-31T10:14:08.130Z",
+  "blockNumber": 3756
 }

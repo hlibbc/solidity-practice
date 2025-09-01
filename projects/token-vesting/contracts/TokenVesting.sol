@@ -205,6 +205,18 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     );
 
     /**
+     * @notice 박스 소유권 이전 이벤트 - 내일부터 효력
+     * @param from 보낸 주소
+     * @param to 받은 주소
+     * @param boxCount 이전한 박스 수
+     */
+    event BoxesTransferred(
+        address indexed from,
+        address indexed to,
+        uint256 boxCount
+    );
+
+    /**
      * @notice 구매자 풀 기준 보상 클레임 완료 이벤트 - 베스팅 토큰 지급
      * @param user 클레임한 사용자 주소
      * @param amount 최종 지급액(vestingToken 단위; 18→6 자리 절삭 적용)
@@ -514,6 +526,62 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         _upgradeBadgeIfNeeded(buyer, sbtId);
     }
 
+/**
+ * @notice [관리자 전용] 과거 시점 기준 박스 소유권 이전 백필
+ * @param from    이전자
+ * @param to      수령자
+ * @param boxCount 이전 수량
+ * @param transferTs '이전 발생 시각' (Unix ts). 실제 효력은 다음 날(effDay)부터.
+ * @dev
+ * - 구매/판매 기록(cumBoxes, boxesAddedPerDay, referralsAddedPerDay, totalBoughtBoxes 등) 변경 없음
+ * - 확정된 날짜 이전으로는 백필 불가: purchase와 동일하게 d >= lastSyncedDay 요구
+ * - effDay = d + 1 (d = (transferTs - vestingStartDate)/86400, transferTs < start면 d=0)
+ * - from의 d일 기준 보유량 스냅샷이 boxCount 이상이어야 함
+ * - from: effDay에 '절대값' 체크포인트로 감소 반영
+ * - to  : effDay에 누적 증가 체크포인트(_pushBuyerCheckpoint) 반영
+ */
+function backfillSendBoxAt(
+    address from,
+    address to,
+    uint256 boxCount,
+    uint256 transferTs
+) external onlyOwner {
+    require(scheduleInitialized, "no schedule");
+    require(from != address(0) && to != address(0), "zero");
+    require(from != to, "same");
+    require(boxCount > 0, "box=0");
+
+    uint256 d = (transferTs < vestingStartDate)? 0 : (transferTs - vestingStartDate) / SECONDS_PER_DAY;
+    // 확정된 날짜 이전으로는 백필 불가
+    require(d >= lastSyncedDay, "day finalized");
+
+    uint256 effDay = d + 1;
+    // ── from(보낸 사람) 절대값 누적 차감(in-place)
+    BoxAmountCheckpoint[] storage sHist = buyerBoxAmountHistory[from];
+    // base: (같은 effDay 마지막 CP가 있으면 그 amount, 없으면 '해당 d 기준 보유량')
+    uint256 base = _balanceAtDay(buyerBoxAmountHistory[from], d);
+    if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
+        base = sHist[sHist.length - 1].amount;
+    }
+    require(base >= boxCount, "insufficient after prior transfers");
+
+    uint256 newFromBal = base - boxCount;
+    if (sHist.length == 0 && lastBuyerClaimedDay[from] == 0) {
+        lastBuyerClaimedDay[from] = UNSET;
+    }
+    if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
+        sHist[sHist.length - 1].amount = newFromBal; // in-place 수정
+    } else {
+        sHist.push(BoxAmountCheckpoint({ day: effDay, amount: newFromBal }));
+    }
+    // ── to(받는 사람) 누적 증가(구매와 동일 가산 로직)
+    _pushBuyerCheckpoint(to, effDay, boxCount);
+    // 수령자 레퍼럴 코드 보장(선택)
+    _ensureReferralCode(to);
+
+    emit BoxesTransferred(from, to, boxCount);
+}
+
     /**
      * @notice 박스 구매 (EIP-2612 permit은 선택) - 사용자 구매
      * @param boxCount 구매할 박스 수량
@@ -532,6 +600,57 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     ) external nonReentrant {
         bool usePermit = (p.deadline != 0);
         _buy(boxCount, refCodeStr, usePermit, p);
+    }
+
+    /**
+     * @notice 박스 소유권 이전(내일부터 효력) - 구매 기록/분모에는 영향 없음
+     * @param to 수령자
+     * @param boxCount 이전 수량
+     * @dev 
+     * - 오늘 보유량에서 boxCount를 차감하여 내일부터 효력 발생(effDay = today + 1)
+     * - 수령자 보유량은 내일부터 boxCount 증가
+     * - boxesAddedPerDay / cumBoxes(판매량), referralsAddedPerDay 등 '판매/추천 기록'은 변경하지 않음
+     * - totalBoughtBoxes, SBT 등은 '구매' 기준이므로 변경하지 않음
+     */
+    function sendBox(
+        address to, 
+        uint256 boxCount
+    ) external nonReentrant {
+        require(scheduleInitialized, "no schedule");
+        require(block.timestamp >= vestingStartDate, "not started");
+        require(to != address(0), "zero to");
+        require(to != msg.sender, "self");
+        require(boxCount > 0, "box=0");
+
+        uint256 dToday = (block.timestamp - vestingStartDate) / SECONDS_PER_DAY;
+        uint256 effDay = dToday + 1;
+
+        // ── from(보낸 사람) 절대값 누적 차감(in-place)
+        BoxAmountCheckpoint[] storage sHist = buyerBoxAmountHistory[msg.sender];
+        // base: (같은 effDay 마지막 CP가 있으면 그 amount, 없으면 '오늘 기준 보유량')
+        uint256 base = _balanceAtDay(buyerBoxAmountHistory[msg.sender], dToday);
+        if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
+            base = sHist[sHist.length - 1].amount;
+        }
+        require(base >= boxCount, "insufficient after prior sends");
+
+        uint256 newFromBal = base - boxCount;
+        if (sHist.length == 0 && lastBuyerClaimedDay[msg.sender] == 0) {
+            lastBuyerClaimedDay[msg.sender] = UNSET;
+        }
+        if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
+            // 같은 effDay면 마지막 체크포인트를 in-place 수정
+            sHist[sHist.length - 1].amount = newFromBal;
+        } else {
+            // 새 effDay면 절대값 체크포인트 추가
+            sHist.push(BoxAmountCheckpoint({ day: effDay, amount: newFromBal }));
+        }
+        // ── to(받는 사람) 누적 증가(구매와 동일 가산 로직)
+        _pushBuyerCheckpoint(to, effDay, boxCount);
+        // 수령자 레퍼럴 코드 보장(선택)
+        _ensureReferralCode(to);
+
+        emit BoxesTransferred(msg.sender, to, boxCount);
     }
 
     /**
@@ -1000,17 +1119,18 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
 
         sync();
 
-        uint256 cost = 0; // BOX_PRICE_UNITS * boxCount;
         if (usePermit) {
             IERC20Permit(address(stableCoin)).permit(
                 msg.sender, address(this),
                 p.value, p.deadline, p.v, p.r, p.s
             );
         }
-        require(stableCoin.transferFrom(msg.sender, address(this), cost), "StableCoin xfer failed");
+        require(stableCoin.transferFrom(msg.sender, address(this), estimatedPrice), "StableCoin xfer failed");
 
-        uint256 buyback = (cost * BUYBACK_PERCENT) / 100;
-        buybackUSDT[referrer] += buyback;
+        // BUYBACK_PERCENT에 해당하는 금액만 남기고 나머지는 Recipient에게 전송
+        uint256 buyback = (estimatedPrice * BUYBACK_PERCENT) / 100;
+        buybackUSDT[referrer] += buyback; // 바이백 받을 양 기록
+        require(stableCoin.transferFrom(msg.sender, recipient, (estimatedPrice - buyback)), "StableCoin xfer failed");
 
         uint256 dToday = (block.timestamp - vestingStartDate) / SECONDS_PER_DAY;
         boxesAddedPerDay[dToday]     += boxCount;
@@ -1020,7 +1140,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         _pushRefCheckpoint(referrer, dToday, boxCount);
         _ensureReferralCode(msg.sender);
 
-        emit BoxesPurchased(msg.sender, boxCount, referrer, cost, buyback, normCode);
+        emit BoxesPurchased(msg.sender, boxCount, referrer, estimatedPrice, buyback, normCode);
 
         totalBoughtBoxes[msg.sender] += boxCount; // ① 누적 구매량 갱신
         uint256 sbtId = _ensureSbt(msg.sender); // ② 첫 구매면 SBT 민트

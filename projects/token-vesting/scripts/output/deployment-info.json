@@ -3,13 +3,13 @@
     "name": "unknown",
     "chainId": "31337"
   },
-  "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "deployer": "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
   "forwarder": "0x0000000000000000000000000000000000000000",
   "startTs": "1748822400",
   "contracts": {
-    "stableCoin": "0xD9d684546ED4c727B136503016E137822DD9b4D7",
-    "badgeSBT": "0x79b3f34855c3478Fa45f65344a3f5E3c7b94405c",
-    "tokenVesting": "0x7CA40e352B402C9800b3fedBFC63b6FE79B8Fc0B",
+    "stableCoin": "0x057ef64E23666F000b34aE31332854aCBd1c8544",
+    "badgeSBT": "0x261D8c5e9742e6f7f1076Fa1F560894524e19cad",
+    "tokenVesting": "0xCE3478A9E0167a6Bc5716DC39DbbbfAc38F27623",
     "vestingToken": null
   },
   "schedule": {
@@ -32,6 +32,6 @@
       "0"
     ]
   },
-  "time": "2025-08-31T10:14:08.130Z",
-  "blockNumber": 3756
+  "time": "2025-09-01T00:58:24.578Z",
+  "blockNumber": 6
 }

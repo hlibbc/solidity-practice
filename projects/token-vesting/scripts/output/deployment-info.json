@@ -1,23 +1,24 @@
 {
   "network": {
     "name": "unknown",
-    "chainId": "31337"
+    "chainId": "20250616"
   },
-  "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "deployer": "0x20f7F90c243c556460388cc227C285952CA3Ea9d",
   "forwarder": "0x0000000000000000000000000000000000000000",
   "startTs": "1748822400",
   "contracts": {
-    "stableCoin": "0xD9d684546ED4c727B136503016E137822DD9b4D7",
-    "badgeSBT": "0x79b3f34855c3478Fa45f65344a3f5E3c7b94405c",
-    "tokenVesting": "0x7CA40e352B402C9800b3fedBFC63b6FE79B8Fc0B",
-    "vestingToken": null
+    "stableCoin": "0x4a0D4fA4Aa9F061869A4b39A1D958f09e789be4E",
+    "badgeSBT": "0xA9bA5CdAeBaadD27Bbe742A643F684c007397666",
+    "tokenVesting": "0x5A112A2a45cFbd39a75aE82fE3A9bb4DD4756c7A",
+    "vestingToken": null,
+    "recipient": "0x20f7F90c243c556460388cc227C285952CA3Ea9d"
   },
   "schedule": {
     "ends": [
-      "1780444799",
-      "1811980799",
-      "1843603199",
-      "1875139199"
+      "1780271999",
+      "1811807999",
+      "1843430399",
+      "1874966399"
     ],
     "buyerTotals": [
       "170000000000000000000000000",
@@ -32,6 +33,6 @@
       "0"
     ]
   },
-  "time": "2025-08-31T10:14:08.130Z",
-  "blockNumber": 3756
+  "time": "2025-09-02T08:30:52.266Z",
+  "blockNumber": 2424523
 }

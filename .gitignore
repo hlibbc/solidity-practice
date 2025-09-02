@@ -20,3 +20,6 @@ node_modules/
 # Ignore Temporary files (for testing)
 **/*.csv
 .DS_Store
+
+# Ignore Typechain outputs
+**/typechain-types

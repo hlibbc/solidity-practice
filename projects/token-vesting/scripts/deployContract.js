@@ -36,8 +36,13 @@ async function main() {
 
     // ─────────────────────────────────────────────────────────────
     // 🔒 하드코딩된 베스팅 시작/종료값
-    const START_TS = 1748822400n;
-    const ENDS = [1780444799n, 1811980799n, 1843603199n, 1875139199n]; // inclusive
+    const START_TS = 1748822400n; // 2025.06.02 00:00:00 UTC
+    const ENDS = [
+        1780271999n, // 2026.05.31 23:59:59 
+        1811807999n, // 2027.05.31 23:59:59
+        1843430399n, // 2028.05.31 23:59:59
+        1874966399n, // 2029.05.31 23:59:59
+    ]; // inclusive
     // 필요시 값 조정
     const BUYER_TOTALS = [
         ethers.parseUnits('170000000', 18),
@@ -141,6 +146,23 @@ async function main() {
             console.log('\n6️⃣ vestingToken 설정은 스킵(미지정). 추후 setVestingToken으로 설정 가능.');
         }
 
+        let recipientAddr = null;
+        const RECIPIENT_ADDR = process.env.RECIPIENT_ADDR || '';
+        if (RECIPIENT_ADDR && RECIPIENT_ADDR !== ZERO) {
+            try {
+                recipientAddr = ethers.getAddress(RECIPIENT_ADDR);
+                console.log('\n6.5️⃣ recipient 설정 중...');
+                const txSetRecipient = await vesting.setRecipient(recipientAddr);
+                await txSetRecipient.wait();
+                console.log('✅ recipient 설정 완료:', recipientAddr);
+                await waitIfNeeded();
+            } catch (e) {
+                console.warn('⚠️ recipient 설정 실패. 주소를 확인하세요:', RECIPIENT_ADDR, '\n reason:', e?.reason || e?.message || String(e));
+            }
+        } else {
+            console.log('\n6.5️⃣ recipient 설정 스킵(미지정). 추후 setRecipient으로 설정 가능.');
+        }
+
         // 7) 결과 저장
         const deploymentInfo = {
             network: (await provider.getNetwork()).toJSON?.() ?? await provider.getNetwork(),
@@ -152,6 +174,7 @@ async function main() {
                 badgeSBT: sbtAddr,
                 tokenVesting: vestingAddr,
                 vestingToken: VESTING_TOKEN_ADDRESS || null,
+                recipient: recipientAddr,
             },
             schedule: {
                 ends: toJsonableBigInts(ENDS),

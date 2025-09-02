@@ -101,14 +101,30 @@ function parseUsdt6(v) {
  */
 function parseEpochSec(v) {
     const t = String(v).trim();
+
+    // 10자리(초), 13자리(밀리초) epoch 그대로 처리
     if (/^\d{10}$/.test(t)) return BigInt(t);
     if (/^\d{13}$/.test(t)) return BigInt(t) / 1000n;
+
     let iso = t;
-    if (!/[zZ]|[+\-]\d{2}:?\d{2}/.test(t)) iso = t.replace(" ", "T") + "Z";
+
+    // "YYYY-MM-DD H:mm[:ss]" → "YYYY-MM-DDTHH:mm[:ss]Z" 로 변환
+    const m = t.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (m) {
+        const [_, date, h, mm, ssRaw] = m;
+        const hh = h.padStart(2, "0");       // <- 한 자리 시 패딩
+        const ss = (ssRaw || "00").padStart(2, "0");
+        iso = `${date}T${hh}:${mm}:${ss}Z`;
+    } else if (!/[zZ]|[+\-]\d{2}:?\d{2}/.test(t)) {
+        // 다른 포맷인데 타임존 없으면 Z 붙여줌
+        iso = t.replace(" ", "T") + "Z";
+    }
+
     const ms = Date.parse(iso);
     if (Number.isNaN(ms)) throw new Error(`Bad datetime: ${v}`);
     return BigInt(Math.floor(ms / 1000));
 }
+
 
 // ──────────────────────────────────────────────────────────────────────────────
 /**
@@ -222,7 +238,19 @@ async function main() {
     const info = loadDeploymentInfo();
     const vestingAddr = info?.contracts?.tokenVesting;
     if (!vestingAddr) throw new Error("tokenVesting address missing in deployment-info.json");
-    const [owner] = await ethers.getSigners();
+    let owner;
+    if(hre.network.name != 'development') {
+        const ownerKey = process.env.OWNER_KEY;
+        if (!ownerKey) {
+            throw new Error('❌ .env에 OWNER_KEY를 설정하세요.');
+        }
+        const providerUrl = process.env.PROVIDER_URL || 'http://localhost:8545';
+        const provider = new ethers.JsonRpcProvider(providerUrl);
+        owner = new ethers.Wallet(ownerKey, provider);
+    } else {
+        owner = (await ethers.getSigners())[0];
+    }
+    
     const vesting = await ethers.getContractAt("TokenVesting", vestingAddr, owner);
 
     // 1) 레퍼럴 선등록
@@ -250,14 +278,20 @@ async function main() {
         const rows = parsePurchasesCsv(mustRead(purchaseCsvPath));
         console.log(`[purchase] ${rows.length} rows`);
         let ok = 0, skipped = 0;
-        for (const row of rows) {
+
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
             try {
                 const buyer = ethers.getAddress(row.wallet);
                 const refCodeStr = normCodeMaybeEmpty(row.ref);
                 const boxCount = parseBoxCount(row.amount);
-                if (boxCount === 0n) { skipped++; continue; }
+                if (boxCount === 0n) { 
+                    skipped++; 
+                    continue; 
+                }
                 const paidUnits = boxCount * parseUsdt6(row.price);
                 const purchaseTs = parseEpochSec(row.time);
+
                 await (await vesting.connect(owner).backfillPurchaseAt(
                     buyer,
                     refCodeStr,   // "" 가능
@@ -266,12 +300,19 @@ async function main() {
                     paidUnits,
                     false  // creditBuyback: 운영정책에 맞게 조정
                 )).wait();
+
                 ok++;
             } catch (e) {
                 console.warn("[purchase skip]", row, "\n reason:", e?.reason || e?.message || String(e));
                 skipped++;
             }
+
+            const processed = i + 1;
+            if (processed % 10 === 0) {
+                console.log(`[purchase] progress ${processed}/${rows.length} (ok=${ok}, skipped=${skipped})`);
+            }
         }
+
         console.log(`[purchase] success=${ok}, skipped=${skipped}`);
     } else {
         console.log("[purchase] skipped: purchase_history.csv not found");
@@ -283,25 +324,38 @@ async function main() {
         const rows = parseSendboxCsv(mustRead(sendboxCsvPath));
         console.log(`[sendbox] ${rows.length} rows`);
         let ok = 0, skipped = 0;
-        for (const row of rows) {
+
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
             try {
                 const from = ethers.getAddress(row.from);
                 const to = ethers.getAddress(row.to);
                 const amount = parseBoxCount(row.amount);
-                if (amount === 0n) { skipped++; continue; }
+                if (amount === 0n) { 
+                    skipped++; 
+                    continue; 
+                }
                 const ts = parseEpochSec(row.time);
+
                 await (await vesting.connect(owner).backfillSendBoxAt(
                     from,
                     to,
                     amount,
                     ts
                 )).wait();
+
                 ok++;
             } catch (e) {
                 console.warn("[sendbox skip]", row, "\n reason:", e?.reason || e?.message || String(e));
                 skipped++;
             }
+
+            const processed = i + 1;
+            if (processed % 10 === 0) {
+                console.log(`[sendbox] progress ${processed}/${rows.length} (ok=${ok}, skipped=${skipped})`);
+            }
         }
+
         console.log(`[sendbox] success=${ok}, skipped=${skipped}`);
     } else {
         console.log("[sendbox] skipped: sendbox_history.csv not found");

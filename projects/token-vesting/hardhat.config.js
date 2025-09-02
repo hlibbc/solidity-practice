@@ -11,12 +11,19 @@ module.exports = {
   solidity: {
     version: "0.8.28",
     settings: {
-      evmVersion: "cancun",
-      optimizer: { enabled: true, runs: 200 },
+      // evmVersion: "cancun",
+      optimizer: {
+        enabled: true, runs: 200
+      },
     },
   },
   networks: {
-    development: { url: "http://127.0.0.1:8545" },
+    development: { 
+      url: process.env.PROVIDER_URL
+    },
+    LKtestnet: {
+      url: process.env.PROVIDER_URL
+    }
   },
 };
 

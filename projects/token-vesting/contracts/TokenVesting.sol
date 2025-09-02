@@ -147,11 +147,11 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * @param day 베스팅 시작일 기준 0-베이스 일 인덱스(이 날이 확정됨)
      * @param rewardPerBox Purchase 풀의 '박스 1개당' 일일 보상 단가(18dec)
      * @param rewardPerRefUnit Referral 풀의 '추천 단위 1개당' 일일 보상 단가(18dec)
-     * @param boxesDenom 분모로 사용된 박스 수(전일까지 누적)
-     * @param referralDenom 분모로 사용된 레퍼럴 수(전일까지 누적)
+     * @param boxesDenom 분모로 사용된 박스 수(당일까지 누적)
+     * @param referralDenom 분모로 사용된 레퍼럴 수(당일까지 누적)
      * @dev
      * - day = (dayStartTs - vestingStartDate) / SECONDS_PER_DAY (0-베이스)
-     * - 당일 추가분은 분모에 포함되지 않음(항상 전일까지의 누적치 기준)
+     * - 당일까지 누적(= 당일분 포함)
      * - 보통 d==0에서는 분모가 0이므로 rewardPerBox/rewardPerRefUnit은 0
      * - 단위:
      *   - rewardPerBox, rewardPerRefUnit: 18 decimals
@@ -190,7 +190,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * @param refCode 추천 코드(bytes8, 대문자 영문/숫자 8자, 정규화된 값)
      * @dev
      * - buyBox 성공 시 emit (adminBackfillPurchaseAt도 동일 이벤트 emit)
-     * - 당일 구매분은 다음 날부터 보상에 반영됨(effDay = dToday + 1)
+     * - 당일 구매분은 당일 분배에 참여, 익일 00:00 확정 (effDay = dToday)
      * - paidAmount / buyback 단위: stableCoin의 최소 단위(예: USDT, USDC의 경우 6dec)
      * - 자기추천 불가 (referrer != buyer 검증)
      * - 레퍼럴 코드는 정규화된 8자리 bytes8 형태로 저장
@@ -205,10 +205,11 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     );
 
     /**
-     * @notice 박스 소유권 이전 이벤트 - 내일부터 효력
+     * @notice 박스 소유권 이전 이벤트 - 내일부터 효력     
      * @param from 보낸 주소
      * @param to 받은 주소
      * @param boxCount 이전한 박스 수
+     * @dev 전송(send)/백필전송: “**다음 날(effDay=d+1)**부터 유효”
      */
     event BoxesTransferred(
         address indexed from,
@@ -618,25 +619,28 @@ function backfillSendBoxAt(
     ) external nonReentrant {
         require(scheduleInitialized, "no schedule");
         require(block.timestamp >= vestingStartDate, "not started");
+
+        address sender = _msgSender();
+
         require(to != address(0), "zero to");
-        require(to != msg.sender, "self");
+        require(to != sender, "self");
         require(boxCount > 0, "box=0");
 
         uint256 dToday = (block.timestamp - vestingStartDate) / SECONDS_PER_DAY;
         uint256 effDay = dToday + 1;
 
         // ── from(보낸 사람) 절대값 누적 차감(in-place)
-        BoxAmountCheckpoint[] storage sHist = buyerBoxAmountHistory[msg.sender];
+        BoxAmountCheckpoint[] storage sHist = buyerBoxAmountHistory[sender];
         // base: (같은 effDay 마지막 CP가 있으면 그 amount, 없으면 '오늘 기준 보유량')
-        uint256 base = _balanceAtDay(buyerBoxAmountHistory[msg.sender], dToday);
+        uint256 base = _balanceAtDay(buyerBoxAmountHistory[sender], dToday);
         if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
             base = sHist[sHist.length - 1].amount;
         }
         require(base >= boxCount, "insufficient after prior sends");
 
         uint256 newFromBal = base - boxCount;
-        if (sHist.length == 0 && lastBuyerClaimedDay[msg.sender] == 0) {
-            lastBuyerClaimedDay[msg.sender] = UNSET;
+        if (sHist.length == 0 && lastBuyerClaimedDay[sender] == 0) {
+            lastBuyerClaimedDay[sender] = UNSET;
         }
         if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
             // 같은 effDay면 마지막 체크포인트를 in-place 수정
@@ -650,7 +654,7 @@ function backfillSendBoxAt(
         // 수령자 레퍼럴 코드 보장(선택)
         _ensureReferralCode(to);
 
-        emit BoxesTransferred(msg.sender, to, boxCount);
+        emit BoxesTransferred(sender, to, boxCount);
     }
 
     /**
@@ -668,19 +672,21 @@ function backfillSendBoxAt(
         require(scheduleInitialized, "no schedule");
         sync();
 
-        (uint256 fromDay, uint256 toDay) = _claimWindow(lastBuyerClaimedDay[msg.sender]);
+        address sender = _msgSender();
+
+        (uint256 fromDay, uint256 toDay) = _claimWindow(lastBuyerClaimedDay[sender]);
         require(fromDay <= toDay, "nothing to claim");
 
-        uint256 amount = _calcByHistory(buyerBoxAmountHistory[msg.sender], cumRewardPerBox, fromDay, toDay);
+        uint256 amount = _calcByHistory(buyerBoxAmountHistory[sender], cumRewardPerBox, fromDay, toDay);
         require(amount > 0, "zero");
 
-        lastBuyerClaimedDay[msg.sender] = toDay;
+        lastBuyerClaimedDay[sender] = toDay;
 
         uint256 pay = _applyFloor6(amount);
-        require(vestingToken.transfer(msg.sender, pay), "xfer failed");
-        totalClaimedBuyer[msg.sender] += pay;
+        require(vestingToken.transfer(sender, pay), "xfer failed");
+        totalClaimedBuyer[sender] += pay;
 
-        emit PurchasePoolClaimed(msg.sender, pay, fromDay, toDay);
+        emit PurchasePoolClaimed(sender, pay, fromDay, toDay);
     }
 
     /**
@@ -697,19 +703,21 @@ function backfillSendBoxAt(
         require(scheduleInitialized, "no schedule");
         sync();
 
-        (uint256 fromDay, uint256 toDay) = _claimWindow(lastRefClaimedDay[msg.sender]);
+        address sender = _msgSender();
+
+        (uint256 fromDay, uint256 toDay) = _claimWindow(lastRefClaimedDay[sender]);
         require(fromDay <= toDay, "nothing to claim");
 
-        uint256 amount = _calcByHistory(referralAmountHistory[msg.sender], cumRewardPerReferral, fromDay, toDay);
+        uint256 amount = _calcByHistory(referralAmountHistory[sender], cumRewardPerReferral, fromDay, toDay);
         require(amount > 0, "zero");
 
-        lastRefClaimedDay[msg.sender] = toDay;
+        lastRefClaimedDay[sender] = toDay;
 
         uint256 pay = _applyFloor6(amount);
-        require(vestingToken.transfer(msg.sender, pay), "xfer failed");
-        totalClaimedReferral[msg.sender] += pay;
+        require(vestingToken.transfer(sender, pay), "xfer failed");
+        totalClaimedReferral[sender] += pay;
 
-        emit ReferralPoolClaimed(msg.sender, pay, fromDay, toDay);
+        emit ReferralPoolClaimed(sender, pay, fromDay, toDay);
     }
 
     /**
@@ -721,11 +729,13 @@ function backfillSendBoxAt(
      * APP에서 호출됨
      */
     function claimBuyback() external nonReentrant {
-        uint256 amount = buybackUSDT[msg.sender];
+        address sender = _msgSender();
+
+        uint256 amount = buybackUSDT[sender];
         require(amount > 0, "nothing");
-        buybackUSDT[msg.sender] = 0;
-        require(stableCoin.transfer(msg.sender, amount), "StableCoin xfer failed");
-        emit BuybackClaimed(msg.sender, amount);
+        buybackUSDT[sender] = 0;
+        require(stableCoin.transfer(sender, amount), "StableCoin xfer failed");
+        emit BuybackClaimed(sender, amount);
     }
 
     /**
@@ -804,8 +814,12 @@ function backfillSendBoxAt(
             return boxesAddedPerDay[0];
         }
         uint256 finalized = cumBoxes[lastSyncedDay - 1];        // 어제까지 확정 누적
-        uint256 today = boxesAddedPerDay[lastSyncedDay];        // 오늘 미확정 누적
-        return finalized + today;
+        uint256 todayIndex = (block.timestamp < vestingStartDate)? 0 : (block.timestamp - vestingStartDate) / SECONDS_PER_DAY;
+        uint256 pending = 0;
+        for (uint256 d = lastSyncedDay; d <= todayIndex; d++) {
+            pending += boxesAddedPerDay[d];
+        }
+        return finalized + pending;
     }
 
     /**
@@ -1001,9 +1015,9 @@ function backfillSendBoxAt(
     }
 
     /**
-     * @notice 구매자 풀 기준: 어제 하루 동안 벌어진 양(6dec, 절삭). 클레임/동기화와 무관.
+     * @notice 구매자 풀 기준: 어제 하루 동안 벌어진 양. 클레임/동기화와 무관.
      * @param user 조회할 사용자 주소
-     * @return pay6 어제 하루 동안 벌어진 구매자 풀 보상 (6 decimals, 절삭)
+     * @return pay6 어제 하루 동안 벌어진 구매자 풀 보상 (18dec 기준, 소수 6자리 절삭(하위 12자리 0))
      * @dev 
      * - 현재 시점을 기준으로 어제 하루의 보상만 계산
      * - 베스팅 시작일 이전이면 0 반환
@@ -1098,7 +1112,7 @@ function backfillSendBoxAt(
      * @dev 
      * - 구매 전 sync() 호출로 보상 확정
      * - 자기추천 방지 (referrer != msg.sender)
-     * - 구매 당일은 다음 날부터 보상에 반영 (effDay = dToday + 1)
+     * - 구매 당일 분배 참여, 익일 00:00 확정
      * - 레퍼럴이 있는 경우 바이백 10% 적립
      */
     function _buy(
@@ -1111,40 +1125,43 @@ function backfillSendBoxAt(
         require(block.timestamp >= vestingStartDate, "not started");
         require(boxCount > 0, "box=0");
 
+        address sender = _msgSender();
+
         (address referrer, bytes8 normCode) = _referrerFromString(refCodeStr);
-        require(referrer != msg.sender, "self referral");
+        require(referrer != sender, "self referral");
+
+        sync();
 
         uint256 estimatedPrice = estimatedTotalAmount(boxCount, refCodeStr);
         require(estimatedPrice == p.value, "The amount to be paid is incorrect.");
 
-        sync();
-
         if (usePermit) {
             IERC20Permit(address(stableCoin)).permit(
-                msg.sender, address(this),
+                sender, address(this),
                 p.value, p.deadline, p.v, p.r, p.s
             );
         }
-        require(stableCoin.transferFrom(msg.sender, address(this), estimatedPrice), "StableCoin xfer failed");
+        require(stableCoin.transferFrom(sender, address(this), estimatedPrice), "StableCoin xfer failed");
 
         // BUYBACK_PERCENT에 해당하는 금액만 남기고 나머지는 Recipient에게 전송
         uint256 buyback = (estimatedPrice * BUYBACK_PERCENT) / 100;
         buybackUSDT[referrer] += buyback; // 바이백 받을 양 기록
-        require(stableCoin.transferFrom(msg.sender, recipient, (estimatedPrice - buyback)), "StableCoin xfer failed");
+        require(recipient != address(0), "recipient not set");
+        require(stableCoin.transfer(recipient, (estimatedPrice - buyback)), "StableCoin xfer failed");
 
         uint256 dToday = (block.timestamp - vestingStartDate) / SECONDS_PER_DAY;
         boxesAddedPerDay[dToday]     += boxCount;
         referralsAddedPerDay[dToday] += boxCount;
 
-        _pushBuyerCheckpoint(msg.sender, dToday, boxCount);
+        _pushBuyerCheckpoint(sender, dToday, boxCount);
         _pushRefCheckpoint(referrer, dToday, boxCount);
-        _ensureReferralCode(msg.sender);
+        _ensureReferralCode(sender);
 
-        emit BoxesPurchased(msg.sender, boxCount, referrer, estimatedPrice, buyback, normCode);
+        emit BoxesPurchased(sender, boxCount, referrer, estimatedPrice, buyback, normCode);
 
-        totalBoughtBoxes[msg.sender] += boxCount; // ① 누적 구매량 갱신
-        uint256 sbtId = _ensureSbt(msg.sender); // ② 첫 구매면 SBT 민트
-        _upgradeBadgeIfNeeded(msg.sender, sbtId); // ③ 등급 갱신(URI 업데이트)
+        totalBoughtBoxes[sender] += boxCount; // ① 누적 구매량 갱신
+        uint256 sbtId = _ensureSbt(sender); // ② 첫 구매면 SBT 민트
+        _upgradeBadgeIfNeeded(sender, sbtId); // ③ 등급 갱신(URI 업데이트)
     }
 
     /**
@@ -1167,8 +1184,8 @@ function backfillSendBoxAt(
         uint256 prevBoxes = (d == 0) ? 0 : cumBoxes[d - 1];
         uint256 prevRefs  = (d == 0) ? 0 : cumReferals[d - 1];
 
-        uint256 boxesDenom    = (d == 0) ? (prevBoxes + boxesAddedPerDay[0])        : prevBoxes;
-        uint256 referralDenom = (d == 0) ? (prevRefs  + referralsAddedPerDay[0])     : prevRefs;
+        uint256 boxesDenom    = prevBoxes + boxesAddedPerDay[d];
+        uint256 referralDenom = prevRefs  + referralsAddedPerDay[d];
 
         // ── 해당 날짜의 일일 풀(18dec)
         uint256 buyerPool = _dailyPoolRawByTs(dayStart, true);
@@ -1276,14 +1293,14 @@ function backfillSendBoxAt(
      */
     function _previewBuyerClaimableAtTs(address user, uint256 ts) internal view returns (uint256) {
         (uint256 fromDay0, uint256 toDay0) = _claimWindow(lastBuyerClaimedDay[user]);
-        (uint256 previewLast,) = _previewLastFinalAt(ts);
+        (uint256 previewLast, uint256 dNext) = _previewLastFinalAt(ts);
 
         uint256 total = 0;
         if (fromDay0 <= toDay0) {
             total += _calcByHistory(buyerBoxAmountHistory[user], cumRewardPerBox, fromDay0, toDay0);
         }
         uint256 startSim = fromDay0 > lastSyncedDay ? fromDay0 : lastSyncedDay;
-        if (startSim <= previewLast) {
+        if (dNext > lastSyncedDay && startSim <= previewLast) {
             total += _previewBuyerPendingAt(user, startSim, previewLast);
         }
         return total;
@@ -1301,14 +1318,14 @@ function backfillSendBoxAt(
      */
     function _previewReferrerClaimableAtTs(address user, uint256 ts) internal view returns (uint256) {
         (uint256 fromDay0, uint256 toDay0) = _claimWindow(lastRefClaimedDay[user]);
-        (uint256 previewLast,) = _previewLastFinalAt(ts);
+        (uint256 previewLast, uint256 dNext) = _previewLastFinalAt(ts);
 
         uint256 total = 0;
         if (fromDay0 <= toDay0) {
             total += _calcByHistory(referralAmountHistory[user], cumRewardPerReferral, fromDay0, toDay0);
         }
         uint256 startSim = fromDay0 > lastSyncedDay ? fromDay0 : lastSyncedDay;
-        if (startSim <= previewLast) {
+        if (dNext > lastSyncedDay && startSim <= previewLast) {
             total += _previewRefPendingAt(user, startSim, previewLast);
         }
         return total;
@@ -1485,13 +1502,13 @@ function backfillSendBoxAt(
     function _referrerFromString(string calldata refCodeStr) internal view returns (address referrer, bytes8 code) {
         code = _normalizeToBytes8(refCodeStr);
         referrer = codeToOwner[code];
-        require(referrer != address(0), "refferal code not found");
+        require(referrer != address(0), "referral code not found");
     }
 
     /**
      * @notice 구매자 박스 보유량 체크포인트 추가 - 히스토리 관리
      * @param user 체크포인트를 추가할 사용자 주소
-     * @param effDay 체크포인트가 효력을 발휘하는 날 (구매일 + 1)
+     * @param effDay 체크포인트가 효력을 발휘하는 날 (구매일)
      * @param added 새로 추가된 박스 수량
      * @dev 
      * - 사용자별 박스 보유량 변화를 시간순으로 추적
@@ -1513,7 +1530,7 @@ function backfillSendBoxAt(
     /**
      * @notice 추천인 레퍼럴 단위 보유량 체크포인트 추가 - 히스토리 관리
      * @param user 체크포인트를 추가할 추천인 주소
-     * @param effDay 체크포인트가 효력을 발휘하는 날 (구매일 + 1)
+     * @param effDay 체크포인트가 효력을 발휘하는 날 (구매일)
      * @param added 새로 추가된 레퍼럴 단위 수량
      * @dev 
      * - 사용자별 레퍼럴 단위 보유량 변화를 시간순으로 추적
@@ -1607,7 +1624,7 @@ function backfillSendBoxAt(
                 }
             }
             // 분모: 항상 "전일까지의 누적 박스 수"
-            uint256 denom = (d == 0) ? (prevBoxes + boxesAddedPerDay[0]) : prevBoxes;
+            uint256 denom = prevBoxes + boxesAddedPerDay[d];
 
             if (denom > 0 && curBal > 0) {
                 // 해당 날짜(day d)의 자정 타임스탬프
@@ -1655,7 +1672,7 @@ function backfillSendBoxAt(
 
         for (uint256 d = startSim; d <= endSim; d++) {
             while (i < n && hist[i].day <= d) { curBal = hist[i].amount; unchecked { i++; } }
-            uint256 denom = (d == 0) ? (prevRefs + referralsAddedPerDay[0]) : prevRefs;
+            uint256 denom = prevRefs + referralsAddedPerDay[d];
             if (denom > 0 && curBal > 0) {
                 uint256 dayStartTs = vestingStartDate + d * SECONDS_PER_DAY;
                 uint256 pool = _dailyPoolRawByTs(dayStartTs, false);

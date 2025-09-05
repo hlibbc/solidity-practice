@@ -1,4 +1,3 @@
-// scripts/_shared.js
 /**
  * @fileoverview
  *  TokenVesting 프로젝트의 공통 유틸리티 및 헬퍼 함수들을 모아놓은 공유 모듈
@@ -9,9 +8,10 @@
  *   - 배포 정보 파일 로드 및 정규화
  *   - 스마트 컨트랙트 인스턴스 생성 및 연결
  *   - 공통 유틸리티 함수들
+ *   - 가스/수수료 로깅 및 집계 유틸
  * 
  * 사용법:
- *   const { pickAddressArg, attachVestingWithEthers } = require("./_shared");
+ *   const { pickAddressArg, attachVestingWithEthers, withGasLog, printGasSummary } = require("./_shared");
  * 
  * @author hlibbc
  */
@@ -89,17 +89,17 @@ function loadDeployment(file = path.join(__dirname, "output", "deployment-info.j
 
     // 현재 JSON 키에 맞게 컨트랙트 주소 추출 (다양한 키 이름 대응)
     const vesting =
-        c.vesting ||        // 혹시 다른 스크립트에서 이렇게 저장했을 수도 있어 대비
-        c.tokenVesting ||   // ← 당신의 JSON에 있는 실제 키
+        c.vesting ||
+        c.tokenVesting ||
         c.TokenVesting;
 
     const sbt =
         c.sbt ||
-        c.badgeSBT ||       // ← 실제 키
+        c.badgeSBT ||
         c.BadgeSBT;
 
     const stableCoin =
-        c.stableCoin ||     // ← 실제 키
+        c.stableCoin ||
         c.StableCoin ||
         c.usdt ||
         c.USDT;
@@ -157,20 +157,110 @@ async function attachVestingWithEthers() {
 }
 
 // =============================================================================
-// 모듈 내보내기
+// 가스/수수료 로깅 유틸
+// =============================================================================
+
+/**
+ * @notice 트랜잭션/영수증에서 가스 사용량, 단가, 총 수수료(wei)를 계산
+ * @param {import("ethers").TransactionResponse} tx
+ * @param {import("ethers").TransactionReceipt} receipt
+ * @returns {{gasUsed: bigint, gasPrice: bigint, feeWei: bigint}}
+ */
+function gasInfo(tx, receipt) {
+    const gasUsed = receipt?.gasUsed ?? 0n;
+    const gasPrice =
+        receipt?.gasPrice ??
+        receipt?.effectiveGasPrice ??
+        tx?.gasPrice ??
+        tx?.maxFeePerGas ??
+        0n;
+    const feeWei = gasUsed * gasPrice;
+    return { gasUsed, gasPrice, feeWei };
+}
+
+/**
+ * @notice 한 줄 가스 로그 출력
+ * @param {string} prefix
+ * @param {import("ethers").TransactionResponse} tx
+ * @param {import("ethers").TransactionReceipt} receipt
+ */
+function logGas(prefix, tx, receipt) {
+    const { gasUsed, gasPrice, feeWei } = gasInfo(tx, receipt);
+    console.log(
+        `${prefix} | gasUsed=${gasUsed} | gasPrice=${ethers.formatUnits(gasPrice, "gwei")} gwei | fee=${ethers.formatEther(feeWei)} ETH`
+    );
+}
+
+/**
+ * @notice 누적 집계 객체에 가스/수수료를 더함 (버킷은 필요 시 자동 생성)
+ * @param {Record<string, {gas: bigint, fee: bigint}>} totals
+ * @param {string} bucket
+ * @param {import("ethers").TransactionResponse} tx
+ * @param {import("ethers").TransactionReceipt} receipt
+ */
+function addGasTotals(totals, bucket, tx, receipt) {
+    const gi = gasInfo(tx, receipt);
+    totals[bucket] ??= { gas: 0n, fee: 0n };
+    totals[bucket].gas += gi.gasUsed;
+    totals[bucket].fee += gi.feeWei;
+}
+
+/**
+ * @notice 가스/수수료 요약 출력 (order 제공 시 해당 순서로, 없으면 키 사전순)
+ * @param {Record<string, {gas: bigint, fee: bigint}>} totals
+ * @param {string[]=} order
+ */
+function printGasSummary(totals, order) {
+    const entries = order?.length
+        ? order.filter(k => totals[k]).map(k => [k, totals[k]])
+        : Object.entries(totals).sort(([a], [b]) => a.localeCompare(b));
+    const sumFee = entries.reduce((acc, [, v]) => acc + (v?.fee ?? 0n), 0n);
+
+    for (const [k, v] of entries) {
+        console.log(`[gas:summary] ${k.padEnd(8)} gas=${v.gas} fee=${ethers.formatEther(v.fee)} ETH`);
+    }
+    console.log(`[gas:summary] TOTAL     fee=${ethers.formatEther(sumFee)} ETH`);
+}
+
+/**
+ * @notice 트랜잭션 실행→대기→로깅→누적 집계를 한 번에 수행
+ * @param {string} prefix
+ * @param {Promise<import("ethers").TransactionResponse>} txPromise
+ * @param {Record<string, {gas: bigint, fee: bigint}} totals
+ * @param {string} bucket
+ * @returns {Promise<import("ethers").TransactionReceipt>}
+ */
+async function withGasLog(prefix, txPromise, totals, bucket) {
+    const tx = await txPromise;
+    const rc = await tx.wait();
+    logGas(prefix, tx, rc);
+    if (totals && bucket) {
+        addGasTotals(totals, bucket, tx, rc);
+    }
+    return rc;
+}
+
+// =============================================================================
+/* 모듈 내보내기 */
 // =============================================================================
 
 module.exports = {
-    // === 유틸리티 함수들 ===
-    argv,                    // 명령행 인수 처리
-    pickAddressArg,          // 주소 인자 파싱 및 검증
-    
-    // === 배포 정보 관련 함수들 ===
-    loadDeployment,          // 배포 정보 파일 로드 및 정규화
-    attachContracts,         // 모든 컨트랙트 인스턴스 생성
-    attachVestingWithEthers, // vesting만 필요한 경우를 위한 래퍼
-    
-    // === ethers 라이브러리 재내보내기 ===
-    // 스크립트에서 ethers를 직접 import하지 않고 이 모듈에서 사용할 수 있도록
+    // 유틸리티
+    argv,
+    pickAddressArg,
+
+    // 배포 정보/컨트랙트
+    loadDeployment,
+    attachContracts,
+    attachVestingWithEthers,
+
+    // ethers 재내보내기
     ethers,
+
+    // 가스 유틸
+    gasInfo,
+    logGas,
+    addGasTotals,
+    printGasSummary,
+    withGasLog,
 };

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const hre = require('hardhat');
 const { ethers } = hre;
+const Shared = require('./_shared'); // ← 가스 로깅 유틸
 
 const DAY = 86400n;
 const ZERO = ethers.ZeroAddress;
@@ -23,6 +24,9 @@ function isUtcMidnight(tsBig) { return (tsBig % DAY) === 0n; }
 
 async function main() {
     console.log('🚀 TokenVesting / BadgeSBT / StableCoin 배포 스크립트 시작');
+
+    // ── 가스 집계 버킷
+    const totals = {}; // { deploy: {gas,fee}, setup: {gas,fee} }
 
     // ── 필수: 배포자
     const ownerKey = process.env.OWNER_KEY;
@@ -90,6 +94,9 @@ async function main() {
             console.log('\n1️⃣ StableCoin(USDT) 배포 중...(contracts/Usdt.sol: StableCoin)');
             const Stable = await ethers.getContractFactory('StableCoin', owner);
             const stable = await Stable.deploy();
+            // 배포 트랜잭션 가스 로그
+            const depTx1 = stable.deploymentTransaction();
+            await Shared.withGasLog('[deploy] StableCoin', Promise.resolve(depTx1), totals, 'deploy');
             await stable.waitForDeployment();
             stableAddr = await stable.getAddress();
             console.log('✅ StableCoin 배포 완료:', stableAddr);
@@ -102,6 +109,8 @@ async function main() {
         console.log('\n2️⃣ BadgeSBT 배포 중...');
         const BadgeSBT = await ethers.getContractFactory('BadgeSBT', owner);
         const sbt = await BadgeSBT.deploy(SBT_NAME, SBT_SYMBOL, owner.address);
+        const depTx2 = sbt.deploymentTransaction();
+        await Shared.withGasLog('[deploy] BadgeSBT', Promise.resolve(depTx2), totals, 'deploy');
         await sbt.waitForDeployment();
         const sbtAddr = await sbt.getAddress();
         console.log('✅ BadgeSBT 배포 완료:', sbtAddr);
@@ -111,6 +120,8 @@ async function main() {
         console.log('\n3️⃣ TokenVesting 배포 중...');
         const TV = await ethers.getContractFactory('TokenVesting', owner);
         const vesting = await TV.deploy(FORWARDER, stableAddr, START_TS);
+        const depTx3 = vesting.deploymentTransaction();
+        await Shared.withGasLog('[deploy] TokenVesting', Promise.resolve(depTx3), totals, 'deploy');
         await vesting.waitForDeployment();
         const vestingAddr = await vesting.getAddress();
         console.log('✅ TokenVesting 배포 완료:', vestingAddr);
@@ -118,28 +129,28 @@ async function main() {
 
         // 4) 스케줄 초기화
         console.log('\n4️⃣ 스케줄 초기화...');
-        const txInit = await vesting.initializeSchedule(ENDS, BUYER_TOTALS, REF_TOTALS);
-        await txInit.wait();
+        await Shared.withGasLog(
+            '[setup] initializeSchedule',
+            vesting.initializeSchedule(ENDS, BUYER_TOTALS, REF_TOTALS),
+            totals, 'setup'
+        );
         console.log('✅ initializeSchedule 완료');
         await waitIfNeeded();
 
         // 5) SBT admin 이관 → Vesting, 그리고 Vesting.setBadgeSBT
         console.log('\n5️⃣ SBT admin 이관 → Vesting, 그리고 Vesting.setBadgeSBT...');
-        const txAdmin = await sbt.setAdmin(vestingAddr);
-        await txAdmin.wait();
+        await Shared.withGasLog('[setup] sbt.setAdmin(Vesting)', sbt.setAdmin(vestingAddr), totals, 'setup');
         console.log('   • sbt.setAdmin(Vesting) 완료');
         await waitIfNeeded();
 
-        const txSetSbt = await vesting.setBadgeSBT(sbtAddr);
-        await txSetSbt.wait();
+        await Shared.withGasLog('[setup] vesting.setBadgeSBT(SBT)', vesting.setBadgeSBT(sbtAddr), totals, 'setup');
         console.log('   • vesting.setBadgeSBT(SBT) 완료');
         await waitIfNeeded();
 
         // 6) (선택) vestingToken 설정
         if (VESTING_TOKEN_ADDRESS && VESTING_TOKEN_ADDRESS !== ZERO) {
             console.log('\n6️⃣ vestingToken 설정 중...');
-            const txSetToken = await vesting.setVestingToken(VESTING_TOKEN_ADDRESS);
-            await txSetToken.wait();
+            await Shared.withGasLog('[setup] vesting.setVestingToken', vesting.setVestingToken(VESTING_TOKEN_ADDRESS), totals, 'setup');
             console.log('✅ vestingToken 설정 완료:', VESTING_TOKEN_ADDRESS);
             await waitIfNeeded();
         } else {
@@ -152,8 +163,7 @@ async function main() {
             try {
                 recipientAddr = ethers.getAddress(RECIPIENT_ADDR);
                 console.log('\n6.5️⃣ recipient 설정 중...');
-                const txSetRecipient = await vesting.setRecipient(recipientAddr);
-                await txSetRecipient.wait();
+                await Shared.withGasLog('[setup] vesting.setRecipient', vesting.setRecipient(recipientAddr), totals, 'setup');
                 console.log('✅ recipient 설정 완료:', recipientAddr);
                 await waitIfNeeded();
             } catch (e) {
@@ -190,6 +200,10 @@ async function main() {
         const outFile = path.join(outDir, `deployment-info.json`);
         fs.writeFileSync(outFile, JSON.stringify(deploymentInfo, null, 2));
         console.log(`\n💾 배포 정보를 ${outFile} 에 저장했습니다.`);
+
+        // ── 가스 요약
+        Shared.printGasSummary(totals, ['deploy', 'setup']);
+
         console.log('\n🎉 모든 배포 단계 완료!');
     } catch (err) {
         console.error('❌ 배포 중 오류:', err);

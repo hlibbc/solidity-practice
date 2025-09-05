@@ -22,6 +22,7 @@ const fs = require("fs");
 const path = require("path");
 const hre = require("hardhat");
 const { ethers } = hre;
+const Shared = require("./_shared"); // 가스 유틸(withGasLog 등) 사용
 
 // ── .env 로드 (scripts/adhoc 기준 상위에 .env가 있다면 경로 맞춰 주세요)
 require("dotenv").config({ path: path.join(__dirname, "../.env") });
@@ -112,11 +113,10 @@ function parseEpochSec(v) {
     const m = t.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
     if (m) {
         const [_, date, h, mm, ssRaw] = m;
-        const hh = h.padStart(2, "0");       // <- 한 자리 시 패딩
+        const hh = h.padStart(2, "0");
         const ss = (ssRaw || "00").padStart(2, "0");
         iso = `${date}T${hh}:${mm}:${ss}Z`;
     } else if (!/[zZ]|[+\-]\d{2}:?\d{2}/.test(t)) {
-        // 다른 포맷인데 타임존 없으면 Z 붙여줌
         iso = t.replace(" ", "T") + "Z";
     }
 
@@ -167,7 +167,7 @@ function parsePurchasesCsv(csvText) {
         ref: header.findIndex(h => h === "referral" || h === "referral_code"),
         amount: header.findIndex(h => h === "amount"),
         time: header.findIndex(h => h === "updated_at"),
-        price: header.findIndex(h => h === "price"), // 선택
+        price: header.findIndex(h => h === "price"),
     };
     const hasHeader = Object.values(idx).some(i => i !== -1);
     if (hasHeader) {
@@ -176,7 +176,6 @@ function parsePurchasesCsv(csvText) {
         }
         start = 1;
     } else {
-        // 헤더가 없다면 기본 위치 가정 (0,1,2,4)
         idx.wallet = 0; idx.ref = 1; idx.amount = 2; idx.time = 4; idx.price = -1;
     }
     const rows = [];
@@ -184,7 +183,7 @@ function parsePurchasesCsv(csvText) {
         const cols = lines[i].split(",").map(s => s.trim());
         const g = k => (idx[k] >= 0 && idx[k] < cols.length) ? cols[idx[k]] : "";
         const wallet = g("wallet"), ref = g("ref"), amount = g("amount"), time = g("time");
-        const price = g("price") || "300"; // 필요 시 상수/컬럼 혼용
+        const price = g("price") || "300";
         if (wallet && amount && time) rows.push({ wallet, ref, amount, price, time });
     }
     return rows;
@@ -212,7 +211,6 @@ function parseSendboxCsv(csvText) {
         }
         start = 1;
     } else {
-        // 헤더가 없다면 컬럼 순서를 알아야 하므로 강제 에러
         throw new Error("sendbox_history.csv must have header");
     }
     const rows = [];
@@ -238,19 +236,23 @@ async function main() {
     const info = loadDeploymentInfo();
     const vestingAddr = info?.contracts?.tokenVesting;
     if (!vestingAddr) throw new Error("tokenVesting address missing in deployment-info.json");
+
+    // 가스 집계 버킷
+    const totals = {}; // { referral: {gas,fee}, purchase: {...}, send: {...}, sync: {...} }
+
     let owner;
-    if(hre.network.name != 'development') {
+    if (hre.network.name !== "development") {
         const ownerKey = process.env.OWNER_KEY;
         if (!ownerKey) {
-            throw new Error('❌ .env에 OWNER_KEY를 설정하세요.');
+            throw new Error("❌ .env에 OWNER_KEY를 설정하세요.");
         }
-        const providerUrl = process.env.PROVIDER_URL || 'http://localhost:8545';
+        const providerUrl = process.env.PROVIDER_URL || "http://localhost:8545";
         const provider = new ethers.JsonRpcProvider(providerUrl);
         owner = new ethers.Wallet(ownerKey, provider);
     } else {
         owner = (await ethers.getSigners())[0];
     }
-    
+
     const vesting = await ethers.getContractAt("TokenVesting", vestingAddr, owner);
 
     // 1) 레퍼럴 선등록
@@ -259,14 +261,20 @@ async function main() {
         const userRows = parseUsersCsv(mustRead(userCsvPath));
         const users = userRows.map(r => ethers.getAddress(r.wallet));
         const codes = userRows.map(r => normCodeMaybeEmpty(r.code));
-        if (typeof vesting.setReferralCodesBulk === "function") {
-            await (await vesting.connect(owner).setReferralCodesBulk(users, codes, true)).wait();
-            console.log(`[referral] setReferralCodesBulk: ${users.length} entries`);
+        if (typeof vesting.setReferralCodesBulk === "function" && vesting.setReferralCodesBulk) {
+            await Shared.withGasLog(
+                `[referral] setReferralCodesBulk x${users.length}`,
+                vesting.connect(owner).setReferralCodesBulk(users, codes, true),
+                totals, "referral"
+            );
         } else {
             for (let i = 0; i < users.length; i++) {
-                await (await vesting.connect(owner).setReferralCode(users[i], codes[i], true)).wait();
+                await Shared.withGasLog(
+                    `[referral] setReferralCode ${i + 1}/${users.length}`,
+                    vesting.connect(owner).setReferralCode(users[i], codes[i], true),
+                    totals, "referral"
+                );
             }
-            console.log(`[referral] setReferralCode(loop): ${users.length} entries`);
         }
     } else {
         console.log("[referral] skipped: user.csv not found");
@@ -285,21 +293,25 @@ async function main() {
                 const buyer = ethers.getAddress(row.wallet);
                 const refCodeStr = normCodeMaybeEmpty(row.ref);
                 const boxCount = parseBoxCount(row.amount);
-                if (boxCount === 0n) { 
-                    skipped++; 
-                    continue; 
+                if (boxCount === 0n) {
+                    skipped++;
+                    continue;
                 }
                 const paidUnits = boxCount * parseUsdt6(row.price);
                 const purchaseTs = parseEpochSec(row.time);
 
-                await (await vesting.connect(owner).backfillPurchaseAt(
-                    buyer,
-                    refCodeStr,   // "" 가능
-                    boxCount,
-                    purchaseTs,
-                    paidUnits,
-                    false  // creditBuyback: 운영정책에 맞게 조정
-                )).wait();
+                await Shared.withGasLog(
+                    `[purchase] ${i + 1}/${rows.length}`,
+                    vesting.connect(owner).backfillPurchaseAt(
+                        buyer,
+                        refCodeStr,   // "" 가능
+                        boxCount,
+                        purchaseTs,
+                        paidUnits,
+                        false         // creditBuyback(구버전 시그니처) - 운영정책상 항상 false
+                    ),
+                    totals, "purchase"
+                );
 
                 ok++;
             } catch (e) {
@@ -331,18 +343,17 @@ async function main() {
                 const from = ethers.getAddress(row.from);
                 const to = ethers.getAddress(row.to);
                 const amount = parseBoxCount(row.amount);
-                if (amount === 0n) { 
-                    skipped++; 
-                    continue; 
+                if (amount === 0n) {
+                    skipped++;
+                    continue;
                 }
                 const ts = parseEpochSec(row.time);
 
-                await (await vesting.connect(owner).backfillSendBoxAt(
-                    from,
-                    to,
-                    amount,
-                    ts
-                )).wait();
+                await Shared.withGasLog(
+                    `[sendbox] ${i + 1}/${rows.length}`,
+                    vesting.connect(owner).backfillSendBoxAt(from, to, amount, ts),
+                    totals, "send"
+                );
 
                 ok++;
             } catch (e) {
@@ -365,9 +376,11 @@ async function main() {
     const queryTsStr = process.env.VEST_EPOCH;
     if (!queryTsStr) {
         console.log("[sync] skipped: no VEST_EPOCH in .env");
+        Shared.printGasSummary(totals, ["referral", "purchase", "send", "sync"]);
         console.log("✅ backfillHistory finished.");
         return;
     }
+
     const START_TS = BigInt(info.startTs);
     const DAY = 86400n;
     const QUERY_TS = BigInt(queryTsStr);
@@ -377,8 +390,12 @@ async function main() {
         const lastSyncedDay = BigInt(await vesting.lastSyncedDay());
         const need = dTarget > lastSyncedDay ? (dTarget - lastSyncedDay) : 0n;
         if (need > 0n) {
-            await (await vesting.syncLimitDay(need)).wait();
-            console.log(`[sync] syncLimitDay(${need.toString()}) done (lastSyncedDay: ${lastSyncedDay.toString()} -> ${dTarget.toString()})`);
+            await Shared.withGasLog(
+                `[sync] syncLimitDay(${need.toString()})`,
+                vesting.syncLimitDay(need),
+                totals, "sync"
+            );
+            console.log(`[sync] done (lastSyncedDay: ${lastSyncedDay.toString()} -> ${dTarget.toString()})`);
         } else {
             console.log(`[sync] up-to-date (lastSyncedDay=${lastSyncedDay.toString()} >= dTarget=${dTarget.toString()})`);
         }
@@ -386,6 +403,8 @@ async function main() {
         console.warn("[sync] failed:", e?.reason || e?.message || String(e));
     }
 
+    // 가스 요약 출력
+    Shared.printGasSummary(totals, ["referral", "purchase", "send", "sync"]);
     console.log("✅ backfillHistory finished.");
 }
 
@@ -393,5 +412,3 @@ main().catch((e) => {
     console.error(e);
     process.exit(1);
 });
-
-

@@ -1,0 +1,29 @@
+{
+    "name": "hardhat3-test",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "compile": "hardhat compile",
+        "build": "hardhat build",
+        "test": "hardhat test",
+        "typecheck": "tsc --noEmit",
+        "deploy": "hardhat ignition deploy ignition/modules/Example.ts",
+        "deploy:dev": "hardhat ignition deploy ignition/modules/Example.ts --network development",
+        "deploy:reset": "hardhat ignition deploy ignition/modules/Example.ts --network development --reset"
+    },
+    "devDependencies": {
+        "hardhat": "^3.0.4",
+        "@nomicfoundation/hardhat-toolbox-viem": "^5.0.0",
+        "@nomicfoundation/hardhat-network-helpers": "^3.0.0",
+        "@nomicfoundation/hardhat-ignition": "^3.0.2",
+        "@nomicfoundation/hardhat-ignition-viem": "^3.0.2",
+        "@nomicfoundation/hardhat-verify": "^3.0.0",
+        "@nomicfoundation/hardhat-keystore": "^3.0.0",
+        "viem": "^2.37.3",
+        "typescript": "~5.8.0",
+        "@types/node": "^22.18.1",
+        "@openzeppelin/contracts": "^5.4.0",
+        "dotenv": "^17.2.2"
+    }
+}

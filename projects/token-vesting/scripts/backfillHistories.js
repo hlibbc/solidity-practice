@@ -1,11 +1,11 @@
 /* eslint-disable no-console */
 /**
- * @fileoverview 
+ * @fileoverview
  *  TokenVesting 컨트랙트의 히스토리 백필 스크립트 (구매 + 박스 전송)
  * @description
  *   1) user.csv로 레퍼럴 코드 선등록
- *   2) purchase_history.csv 전체 backfillPurchaseAt
- *   3) sendbox_history.csv 전체 backfillSendBoxAt
+ *   2) purchase_history.csv → backfillPurchaseBulkAt (10개씩 벌크)
+ *   3) sendbox_history.csv → backfillSendBoxBulkAt (10개씩 벌크)
  *   4) (옵션) .env의 VEST_EPOCH(= query_ts)까지만 syncLimitDay 1회
  *
  * 실행:
@@ -13,9 +13,15 @@
  *
  * 주의:
  *  - 동일 CSV를 재주입하면 중복 반영됩니다(컨트랙트가 중복 방어 안함)
- *  - 각 CSV는 내부적으로 시간 오름차순 정렬되어 있어야 합니다
+ *  - 각 CSV는 내부적으로 **시간 오름차순 정렬 권장** (같은 user의 effDay가 역전되면 컨트랙트에서 revert)
  *  - 구매 → 전송 → (마지막) sync 순서를 지키십시오
- * 
+ *
+ * 변경사항:
+ *  - 단건 함수(backfillPurchaseAt, backfillSendBoxAt) 대신 벌크 함수 사용:
+ *      - backfillPurchaseBulkAt(BackfillPurchase[]), backfillSendBoxBulkAt(BackfillSendBox[])
+ *  - 배치 크기: 10개 (컨트랙트 MAX_BACKFILL_BULK=10에 맞춤)
+ *  - 실패 시 같은 배치를 **한 번 재시도** (더 복잡한 반 분할 재시도 로직 제거)
+ *
  * @author hlibbc
  */
 const fs = require("fs");
@@ -35,8 +41,6 @@ require("dotenv").config({ path: path.join(__dirname, "../.env") });
  * @param {string} p - 읽을 파일의 절대/상대 경로
  * @returns {string} 파일 텍스트 내용
  * @throws {Error} 파일이 존재하지 않으면 에러를 발생시킵니다
- *
- * 참고: 테스트/스크립트 참조 `scripts/adhoc/vestingClaimable.js`의 CSV 로딩 유틸과 동일 개념입니다.
  */
 function mustRead(p) {
     if (!fs.existsSync(p)) throw new Error(`File not found: ${p}`);
@@ -125,6 +129,37 @@ function parseEpochSec(v) {
     return BigInt(Math.floor(ms / 1000));
 }
 
+/**
+ * @description 배열을 고정 크기(chunkSize)로 분할합니다
+ * @param {Array<T>} arr
+ * @param {number} chunkSize
+ * @returns {Array<Array<T>>}
+ */
+function chunk(arr, chunkSize) {
+    const out = [];
+    for (let i = 0; i < arr.length; i += chunkSize) {
+        out.push(arr.slice(i, i + chunkSize));
+    }
+    return out;
+}
+
+/**
+ * @description tx 팩토리 함수를 받아 1회 재시도까지 수행합니다
+ * @param {() => Promise<any>} txFactory - 호출 시점을 늦추기 위한 팩토리
+ * @param {string} label - 로그 표기용
+ * @param {object} totals - 가스 집계 버킷
+ * @param {string} bucket - 집계 키(referral|purchase|send|sync)
+ */
+async function withRetryOnce(txFactory, label, totals, bucket) {
+    try {
+        await Shared.withGasLog(label, txFactory(), totals, bucket);
+    } catch (e) {
+        console.warn(`${label} failed (1st). retrying...`, e?.reason || e?.message || String(e));
+        // 간단한 짧은 대기(옵션)
+        await new Promise(r => setTimeout(r, 300));
+        await Shared.withGasLog(label + " [retry]", txFactory(), totals, bucket);
+    }
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 /**
@@ -227,9 +262,8 @@ function parseSendboxCsv(csvText) {
 // ─────────────────────────────────────────────────────────────────────────────-
 /**
  * @description TokenVesting 히스토리 백필 메인 루틴
- * 절차: 1) 레퍼럴 선등록 → 2) 구매 백필 → 3) 박스 전송 백필 → 4) (옵션) 동기화
+ * 절차: 1) 레퍼럴 선등록 → 2) 구매 백필(벌크) → 3) 박스 전송 백필(벌크) → 4) (옵션) 동기화
  * 주의: 동일 CSV 재주입 시 중복 반영. CSV는 시간 오름차순 정렬 권장.
- * 참조: `scripts/adhoc/vestingClaimable.js`의 흐름과 주석 스타일.
  */
 async function main() {
     // 배포정보 & 컨트랙트
@@ -280,48 +314,51 @@ async function main() {
         console.log("[referral] skipped: user.csv not found");
     }
 
-    // 2) 구매 내역 백필 (purchase_history.csv)
+    // 2) 구매 내역 백필 (purchase_history.csv → bulk, 10개씩)
     const purchaseCsvPath = path.join(__dirname, "./data/purchase_history.csv");
     if (fs.existsSync(purchaseCsvPath)) {
-        const rows = parsePurchasesCsv(mustRead(purchaseCsvPath));
-        console.log(`[purchase] ${rows.length} rows`);
+        // CSV 파싱 후 시간 오름차순 정렬 권장 (같은 buyer가 섞여 들어올 때 effDay 역전 방지)
+        const rows = parsePurchasesCsv(mustRead(purchaseCsvPath))
+            .sort((a, b) => Number(parseEpochSec(a.time) - parseEpochSec(b.time)));
+
+        console.log(`[purchase] ${rows.length} rows (sorted asc by time)`);
+        const batches = chunk(rows, 10);
         let ok = 0, skipped = 0;
 
-        for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
+        for (let bi = 0; bi < batches.length; bi++) {
+            const batchRows = batches[bi];
             try {
-                const buyer = ethers.getAddress(row.wallet);
-                const refCodeStr = normCodeMaybeEmpty(row.ref);
-                const boxCount = parseBoxCount(row.amount);
-                if (boxCount === 0n) {
-                    skipped++;
-                    continue;
-                }
-                const paidUnits = boxCount * parseUsdt6(row.price);
-                const purchaseTs = parseEpochSec(row.time);
-
-                await Shared.withGasLog(
-                    `[purchase] ${i + 1}/${rows.length}`,
-                    vesting.connect(owner).backfillPurchaseAt(
+                // 컨트랙트 Struct 배열 변환
+                const items = batchRows.map((row) => {
+                    const buyer = ethers.getAddress(row.wallet);
+                    const refCodeStr = normCodeMaybeEmpty(row.ref);
+                    const boxCount = parseBoxCount(row.amount);
+                    const purchaseTs = parseEpochSec(row.time);
+                    const paidUnits = boxCount * parseUsdt6(row.price || "300");
+                    if (boxCount === 0n) throw new Error("boxCount=0");
+                    return {
                         buyer,
-                        refCodeStr,   // "" 가능
+                        refCodeStr,
                         boxCount,
                         purchaseTs,
-                        paidUnits,
-                        false         // creditBuyback(구버전 시그니처) - 운영정책상 항상 false
-                    ),
-                    totals, "purchase"
-                );
+                        paidUnits
+                    };
+                });
 
-                ok++;
+                await withRetryOnce(
+                    () => vesting.connect(owner).backfillPurchaseBulkAt(items),
+                    `[purchase] bulk ${bi + 1}/${batches.length} (size=${items.length})`,
+                    totals,
+                    "purchase"
+                );
+                ok += items.length;
             } catch (e) {
-                console.warn("[purchase skip]", row, "\n reason:", e?.reason || e?.message || String(e));
-                skipped++;
+                console.warn(`[purchase skip] bulk ${bi + 1}/${batches.length}`, "\n reason:", e?.reason || e?.message || String(e));
+                skipped += batchRows.length;
             }
 
-            const processed = i + 1;
-            if (processed % 10 === 0) {
-                console.log(`[purchase] progress ${processed}/${rows.length} (ok=${ok}, skipped=${skipped})`);
+            if ((bi + 1) % 10 === 0) {
+                console.log(`[purchase] progress ${bi + 1}/${batches.length} (ok=${ok}, skipped=${skipped})`);
             }
         }
 
@@ -330,40 +367,48 @@ async function main() {
         console.log("[purchase] skipped: purchase_history.csv not found");
     }
 
-    // 3) 전송 내역 백필 (sendbox_history.csv)
+    // 3) 전송 내역 백필 (sendbox_history.csv → bulk, 10개씩)
     const sendboxCsvPath = path.join(__dirname, "./data/sendbox_history.csv");
     if (fs.existsSync(sendboxCsvPath)) {
-        const rows = parseSendboxCsv(mustRead(sendboxCsvPath));
-        console.log(`[sendbox] ${rows.length} rows`);
+        // CSV 파싱 후 시간 오름차순 정렬 권장 (같은 from의 effDay 역전 방지)
+        const rows = parseSendboxCsv(mustRead(sendboxCsvPath))
+            .sort((a, b) => Number(parseEpochSec(a.time) - parseEpochSec(b.time)));
+
+        console.log(`[sendbox] ${rows.length} rows (sorted asc by time)`);
+        const batches = chunk(rows, 10);
         let ok = 0, skipped = 0;
 
-        for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
+        for (let bi = 0; bi < batches.length; bi++) {
+            const batchRows = batches[bi];
             try {
-                const from = ethers.getAddress(row.from);
-                const to = ethers.getAddress(row.to);
-                const amount = parseBoxCount(row.amount);
-                if (amount === 0n) {
-                    skipped++;
-                    continue;
-                }
-                const ts = parseEpochSec(row.time);
+                const items = batchRows.map((row) => {
+                    const from = ethers.getAddress(row.from);
+                    const to = ethers.getAddress(row.to);
+                    const boxCount = parseBoxCount(row.amount);
+                    const transferTs = parseEpochSec(row.time);
+                    if (boxCount === 0n) throw new Error("boxCount=0");
+                    return {
+                        from,
+                        to,
+                        boxCount,
+                        transferTs
+                    };
+                });
 
-                await Shared.withGasLog(
-                    `[sendbox] ${i + 1}/${rows.length}`,
-                    vesting.connect(owner).backfillSendBoxAt(from, to, amount, ts),
-                    totals, "send"
+                await withRetryOnce(
+                    () => vesting.connect(owner).backfillSendBoxBulkAt(items),
+                    `[sendbox] bulk ${bi + 1}/${batches.length} (size=${items.length})`,
+                    totals,
+                    "send"
                 );
-
-                ok++;
+                ok += items.length;
             } catch (e) {
-                console.warn("[sendbox skip]", row, "\n reason:", e?.reason || e?.message || String(e));
-                skipped++;
+                console.warn(`[sendbox skip] bulk ${bi + 1}/${batches.length}`, "\n reason:", e?.reason || e?.message || String(e));
+                skipped += batchRows.length;
             }
 
-            const processed = i + 1;
-            if (processed % 10 === 0) {
-                console.log(`[sendbox] progress ${processed}/${rows.length} (ok=${ok}, skipped=${skipped})`);
+            if ((bi + 1) % 10 === 0) {
+                console.log(`[sendbox] progress ${bi + 1}/${batches.length} (ok=${ok}, skipped=${skipped})`);
             }
         }
 
@@ -405,7 +450,7 @@ async function main() {
 
     // 가스 요약 출력
     Shared.printGasSummary(totals, ["referral", "purchase", "send", "sync"]);
-    console.log("✅ backfillHistory finished.");
+    console.log(`[UTC ${new Date().toISOString()}] ✅ backfillHistory finished.`);
 }
 
 main().catch((e) => {

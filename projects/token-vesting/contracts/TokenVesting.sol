@@ -54,10 +54,43 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         bytes32 r;
         bytes32 s;
     }
+
+    /**
+     * @notice 과거 구매 백필을 위한 입력 파라미터
+     * @dev
+     * - buyer: 구매자
+     * - refCodeStr: 추천인 레퍼럴 '문자열 코드' (빈 문자열이면 없음)
+     * - boxCount: 구매한 박스 수량
+     * - purchaseTs: 구매 시점 타임스탬프(초)
+     * - paidUnits: 결제된 StableCoin 금액(최소단위)
+     */
+    struct BackfillPurchase {
+        address buyer;
+        string  refCodeStr;
+        uint256 boxCount;
+        uint256 purchaseTs;
+        uint256 paidUnits;
+    }
+
+    /**
+     * @notice 과거 시점 기준 박스 소유권 이전 백필 입력 파라미터
+     * @dev
+     * - from: 소유권 이전자
+     * - from: 소유권 수령자
+     * - from: 이전할 박스수량
+     * - from: 소유권 이전 발생 시각(Unix ts). 실제 효력은 다음 날(effDay)부터.
+     */
+    struct BackfillSendBox {
+        address from;
+        address to;
+        uint256 boxCount;
+        uint256 transferTs;
+    }
     
     /// def. constant
-    uint256 public  constant SECONDS_PER_DAY = 86400; // 1일 (86400초) - UTC 자정 기준 계산용
     uint256 public  constant BUYBACK_PERCENT = 10; // 추천인 바이백 비율 (10%)
+    uint256 private constant SECONDS_PER_DAY = 86400; // 1일 (86400초) - UTC 자정 기준 계산용
+    uint256 private constant MAX_BACKFILL_BULK = 10; // bulk 처리 10개
     uint256 private constant UNSET = type(uint256).max; // "클레임 이력없음" 표식을 위한 센티널 값
     IBadgeSBT.BurnAuth private constant SBT_BURNAUTH = IBadgeSBT.BurnAuth.Neither;
 
@@ -474,114 +507,235 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * - refCodeStr == ""  → 레퍼럴 없음으로 처리(address(0))
      * - refCodeStr != "" → _referrerFromString으로 소유자 조회(없으면 revert "ref code not found")
      */
-    function backfillPurchaseAt(
-        address buyer,
-        string calldata refCodeStr,
-        uint256 boxCount,
-        uint256 purchaseTs,
-        uint256 paidUnits,
-        bool    creditBuyback
+    // function backfillPurchaseAt(
+    //     address buyer,
+    //     string calldata refCodeStr,
+    //     uint256 boxCount,
+    //     uint256 purchaseTs,
+    //     uint256 paidUnits,
+    //     bool    creditBuyback
+    // ) external onlyOwner {
+    //     require(scheduleInitialized, "no schedule");
+    //     require(boxCount > 0, "box=0");
+
+    //     uint256 d = (purchaseTs < vestingStartDate)
+    //         ? 0
+    //         : (purchaseTs - vestingStartDate) / SECONDS_PER_DAY;
+
+    //     require(d >= lastSyncedDay, "day finalized");
+
+    //     // 0) 레퍼럴 문자열 → 주소/bytes8로 해석 (빈 문자열이면 없음)
+    //     address referrer = address(0);
+    //     bytes8  refCode  = bytes8(0);
+    //     if (bytes(refCodeStr).length != 0) {
+    //         (referrer, refCode) = _referrerFromString(refCodeStr); // 없으면 revert
+    //     }
+
+    //     // 1) 스토리지 반영 - 일별 데이터 업데이트
+    //     boxesAddedPerDay[d] += boxCount;
+    //     _pushBuyerCheckpoint(buyer, d, boxCount);
+
+    //     uint256 buyback = 0;
+    //     if (referrer != address(0)) {
+    //         referralsAddedPerDay[d] += boxCount;
+    //         _pushRefCheckpoint(referrer, d, boxCount);
+
+    //         if (creditBuyback && paidUnits > 0) {
+    //             buyback = (paidUnits * BUYBACK_PERCENT) / 100;
+    //             buybackUSDT[referrer] += buyback;
+    //         }
+    //     }
+
+    //     // 2) 코드 보장(존재 없으면 자동 생성) — 구매자/추천인 각각
+    //     _ensureReferralCode(buyer);
+    //     if (referrer != address(0)) {
+    //         _ensureReferralCode(referrer);
+    //     }
+
+    //     // 3) 구매 이벤트 emit (referrer 없으면 0, 코드도 0)
+    //     emit BoxesPurchased(buyer, boxCount, referrer, paidUnits, buyback, refCode);
+
+    //     totalBoughtBoxes[buyer] += boxCount;
+    //     uint256 sbtId = _ensureSbt(buyer);
+    //     _upgradeBadgeIfNeeded(buyer, sbtId);
+    // }
+    /**
+     * @notice 과거 구매 백필 벌크 처리 (바이백 적립 없음)
+     * @dev
+     * - onlyOwner
+     * - items 길이: 1..MAX_BACKFILL_BULK
+     * - 각 원소는 backfillPurchaseAt(단건)과 동일 검증/처리
+     * - 한 건이라도 실패 시 전체 revert (원자성 보장)
+     */
+    function backfillPurchaseBulkAt(
+        BackfillPurchase[] calldata items
     ) external onlyOwner {
         require(scheduleInitialized, "no schedule");
-        require(boxCount > 0, "box=0");
+        uint256 n = items.length;
+        require(n > 0 && n <= MAX_BACKFILL_BULK, "invalid length");
 
-        uint256 d = (purchaseTs < vestingStartDate)
-            ? 0
-            : (purchaseTs - vestingStartDate) / SECONDS_PER_DAY;
+        for (uint256 i = 0; i < n; ) {
+            BackfillPurchase calldata p = items[i];
 
-        require(d >= lastSyncedDay, "day finalized");
-
-        // 0) 레퍼럴 문자열 → 주소/bytes8로 해석 (빈 문자열이면 없음)
-        address referrer = address(0);
-        bytes8  refCode  = bytes8(0);
-        if (bytes(refCodeStr).length != 0) {
-            (referrer, refCode) = _referrerFromString(refCodeStr); // 없으면 revert
-        }
-
-        // 1) 스토리지 반영 - 일별 데이터 업데이트
-        boxesAddedPerDay[d] += boxCount;
-        _pushBuyerCheckpoint(buyer, d, boxCount);
-
-        uint256 buyback = 0;
-        if (referrer != address(0)) {
-            referralsAddedPerDay[d] += boxCount;
-            _pushRefCheckpoint(referrer, d, boxCount);
-
-            if (creditBuyback && paidUnits > 0) {
-                buyback = (paidUnits * BUYBACK_PERCENT) / 100;
-                buybackUSDT[referrer] += buyback;
+            require(p.buyer != address(0), "zero buyer");
+            require(p.boxCount > 0, "box=0");
+            uint256 d = (p.purchaseTs < vestingStartDate)? 0 : (p.purchaseTs - vestingStartDate) / SECONDS_PER_DAY;
+            require(d >= lastSyncedDay, "day finalized");
+            
+            // 0) 레퍼럴 문자열 → 주소/bytes8로 해석 (빈 문자열이면 없음)
+            address referrer = address(0);
+            bytes8  refCode  = bytes8(0);
+            if (bytes(p.refCodeStr).length != 0) {
+                (referrer, refCode) = _referrerFromString(p.refCodeStr); // 없으면 revert
             }
+
+            // 1) 스토리지 반영 - 일별 데이터 업데이트
+            boxesAddedPerDay[d] += p.boxCount;
+            _pushBuyerCheckpoint(p.buyer, d, p.boxCount);
+
+            if (referrer != address(0)) {
+                referralsAddedPerDay[d] += p.boxCount;
+                _pushRefCheckpoint(referrer, d, p.boxCount);
+                // ⛔ 바이백 적립 없음
+            }
+
+            // 2) 코드 보장(존재 없으면 자동 생성) — 구매자/추천인 각각
+            _ensureReferralCode(p.buyer);
+            if (referrer != address(0)) {
+                _ensureReferralCode(referrer);
+            }
+
+            // 3) 이벤트 emit (buyback=0 고정)
+            emit BoxesPurchased(p.buyer, p.boxCount, referrer, p.paidUnits, 0, refCode);
+
+            totalBoughtBoxes[p.buyer] += p.boxCount;
+            uint256 sbtId = _ensureSbt(p.buyer);
+            _upgradeBadgeIfNeeded(p.buyer, sbtId);
+
+            unchecked { ++i; }
         }
+    }
 
-        // 2) 코드 보장(존재 없으면 자동 생성) — 구매자/추천인 각각
-        _ensureReferralCode(buyer);
-        if (referrer != address(0)) {
-            _ensureReferralCode(referrer);
+    // /**
+    // * @notice [관리자 전용] 과거 시점 기준 박스 소유권 이전 백필
+    // * @param from    이전자
+    // * @param to      수령자
+    // * @param boxCount 이전 수량
+    // * @param transferTs '이전 발생 시각' (Unix ts). 실제 효력은 다음 날(effDay)부터.
+    // * @dev
+    // * - 구매/판매 기록(cumBoxes, boxesAddedPerDay, referralsAddedPerDay, totalBoughtBoxes 등) 변경 없음
+    // * - 확정된 날짜 이전으로는 백필 불가: purchase와 동일하게 d >= lastSyncedDay 요구
+    // * - effDay = d + 1 (d = (transferTs - vestingStartDate)/86400, transferTs < start면 d=0)
+    // * - from의 d일 기준 보유량 스냅샷이 boxCount 이상이어야 함
+    // * - from: effDay에 '절대값' 체크포인트로 감소 반영
+    // * - to  : effDay에 누적 증가 체크포인트(_pushBuyerCheckpoint) 반영
+    // */
+    // function backfillSendBoxAt(
+    //     address from,
+    //     address to,
+    //     uint256 boxCount,
+    //     uint256 transferTs
+    // ) external onlyOwner {
+    //     require(scheduleInitialized, "no schedule");
+    //     require(from != address(0) && to != address(0), "zero");
+    //     require(from != to, "same");
+    //     require(boxCount > 0, "box=0");
+
+    //     uint256 d = (transferTs < vestingStartDate)? 0 : (transferTs - vestingStartDate) / SECONDS_PER_DAY;
+    //     // 확정된 날짜 이전으로는 백필 불가
+    //     require(d >= lastSyncedDay, "day finalized");
+
+    //     uint256 effDay = d + 1;
+    //     // ── from(보낸 사람) 절대값 누적 차감(in-place)
+    //     BoxAmountCheckpoint[] storage sHist = buyerBoxAmountHistory[from];
+    //     // base: (같은 effDay 마지막 CP가 있으면 그 amount, 없으면 '해당 d 기준 보유량')
+    //     uint256 base = _balanceAtDay(buyerBoxAmountHistory[from], d);
+    //     if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
+    //         base = sHist[sHist.length - 1].amount;
+    //     }
+    //     require(base >= boxCount, "insufficient after prior transfers");
+
+    //     uint256 newFromBal = base - boxCount;
+    //     if (sHist.length == 0 && lastBuyerClaimedDay[from] == 0) {
+    //         lastBuyerClaimedDay[from] = UNSET;
+    //     }
+    //     if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
+    //         sHist[sHist.length - 1].amount = newFromBal; // in-place 수정
+    //     } else {
+    //         sHist.push(BoxAmountCheckpoint({ day: effDay, amount: newFromBal }));
+    //     }
+    //     // ── to(받는 사람) 누적 증가(구매와 동일 가산 로직)
+    //     _pushBuyerCheckpoint(to, effDay, boxCount);
+    //     // 수령자 레퍼럴 코드 보장(선택)
+    //     _ensureReferralCode(to);
+
+    //     emit BoxesTransferred(from, to, boxCount);
+    // }
+    /**
+     * @notice 과거 시점 기준 박스 소유권 이전 백필 벌크 처리
+     * @dev
+     * - onlyOwner
+     * - items 길이: 1..MAX_BACKFILL_BULK
+     * - 각 원소는 backfillSendBoxAt(단건)과 동일 검증/처리
+     * - 한 건이라도 실패 시 전체 revert (원자성 보장)
+     * - 구매/판매 기록(cumBoxes, boxesAddedPerDay, referralsAddedPerDay, totalBoughtBoxes 등) 변경 없음
+     */
+    function backfillSendBoxBulkAt(
+        BackfillSendBox[] calldata items
+    ) external onlyOwner {
+        require(scheduleInitialized, "no schedule");
+        uint256 n = items.length;
+        require(n > 0 && n <= MAX_BACKFILL_BULK, "invalid length");
+
+        for (uint256 i = 0; i < n; ) {
+            BackfillSendBox calldata t = items[i];
+
+            require(t.from != address(0) && t.to != address(0), "zero");
+            require(t.from != t.to, "same");
+            require(t.boxCount > 0, "box=0");
+
+            uint256 d = (t.transferTs < vestingStartDate)? 0 : (t.transferTs - vestingStartDate) / SECONDS_PER_DAY;
+
+            // 확정된 날짜 이전으로는 백필 불가
+            require(d >= lastSyncedDay, "day finalized");
+
+            uint256 effDay = d + 1;
+
+            // ── from(보낸 사람) 절대값 누적 차감(in-place)
+            BoxAmountCheckpoint[] storage sHist = buyerBoxAmountHistory[t.from];
+
+            // base: (같은 effDay 마지막 CP가 있으면 그 amount, 없으면 '해당 d 기준 보유량')
+            uint256 base = _balanceAtDay(buyerBoxAmountHistory[t.from], d);
+            if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
+                base = sHist[sHist.length - 1].amount;
+            }
+            require(base >= t.boxCount, "insufficient after prior transfers");
+
+            uint256 newFromBal = base - t.boxCount;
+
+            // 최초 이전 시 lastBuyerClaimedDay 초기화(필요 시)
+            if (sHist.length == 0 && lastBuyerClaimedDay[t.from] == 0) {
+                lastBuyerClaimedDay[t.from] = UNSET;
+            }
+
+            // 같은 effDay가 있으면 in-place 수정, 없으면 CP 추가
+            if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
+                sHist[sHist.length - 1].amount = newFromBal;
+            } else {
+                sHist.push(BoxAmountCheckpoint({ day: effDay, amount: newFromBal }));
+            }
+
+            // ── to(받는 사람) 누적 증가(구매와 동일 가산 로직)
+            _pushBuyerCheckpoint(t.to, effDay, t.boxCount);
+
+            // 수령자 레퍼럴 코드 보장(선택)
+            _ensureReferralCode(t.to);
+
+            emit BoxesTransferred(t.from, t.to, t.boxCount);
+
+            unchecked { ++i; }
         }
-
-        // 3) 구매 이벤트 emit (referrer 없으면 0, 코드도 0)
-        emit BoxesPurchased(buyer, boxCount, referrer, paidUnits, buyback, refCode);
-
-        totalBoughtBoxes[buyer] += boxCount;
-        uint256 sbtId = _ensureSbt(buyer);
-        _upgradeBadgeIfNeeded(buyer, sbtId);
     }
-
-/**
- * @notice [관리자 전용] 과거 시점 기준 박스 소유권 이전 백필
- * @param from    이전자
- * @param to      수령자
- * @param boxCount 이전 수량
- * @param transferTs '이전 발생 시각' (Unix ts). 실제 효력은 다음 날(effDay)부터.
- * @dev
- * - 구매/판매 기록(cumBoxes, boxesAddedPerDay, referralsAddedPerDay, totalBoughtBoxes 등) 변경 없음
- * - 확정된 날짜 이전으로는 백필 불가: purchase와 동일하게 d >= lastSyncedDay 요구
- * - effDay = d + 1 (d = (transferTs - vestingStartDate)/86400, transferTs < start면 d=0)
- * - from의 d일 기준 보유량 스냅샷이 boxCount 이상이어야 함
- * - from: effDay에 '절대값' 체크포인트로 감소 반영
- * - to  : effDay에 누적 증가 체크포인트(_pushBuyerCheckpoint) 반영
- */
-function backfillSendBoxAt(
-    address from,
-    address to,
-    uint256 boxCount,
-    uint256 transferTs
-) external onlyOwner {
-    require(scheduleInitialized, "no schedule");
-    require(from != address(0) && to != address(0), "zero");
-    require(from != to, "same");
-    require(boxCount > 0, "box=0");
-
-    uint256 d = (transferTs < vestingStartDate)? 0 : (transferTs - vestingStartDate) / SECONDS_PER_DAY;
-    // 확정된 날짜 이전으로는 백필 불가
-    require(d >= lastSyncedDay, "day finalized");
-
-    uint256 effDay = d + 1;
-    // ── from(보낸 사람) 절대값 누적 차감(in-place)
-    BoxAmountCheckpoint[] storage sHist = buyerBoxAmountHistory[from];
-    // base: (같은 effDay 마지막 CP가 있으면 그 amount, 없으면 '해당 d 기준 보유량')
-    uint256 base = _balanceAtDay(buyerBoxAmountHistory[from], d);
-    if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
-        base = sHist[sHist.length - 1].amount;
-    }
-    require(base >= boxCount, "insufficient after prior transfers");
-
-    uint256 newFromBal = base - boxCount;
-    if (sHist.length == 0 && lastBuyerClaimedDay[from] == 0) {
-        lastBuyerClaimedDay[from] = UNSET;
-    }
-    if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
-        sHist[sHist.length - 1].amount = newFromBal; // in-place 수정
-    } else {
-        sHist.push(BoxAmountCheckpoint({ day: effDay, amount: newFromBal }));
-    }
-    // ── to(받는 사람) 누적 증가(구매와 동일 가산 로직)
-    _pushBuyerCheckpoint(to, effDay, boxCount);
-    // 수령자 레퍼럴 코드 보장(선택)
-    _ensureReferralCode(to);
-
-    emit BoxesTransferred(from, to, boxCount);
-}
 
     /**
      * @notice 박스 구매 (EIP-2612 permit은 선택) - 사용자 구매
@@ -1517,14 +1671,30 @@ function backfillSendBoxAt(
      */
     function _pushBuyerCheckpoint(address user, uint256 effDay, uint256 added) internal {
         BoxAmountCheckpoint[] storage hist = buyerBoxAmountHistory[user];
-        uint256 newBal = added;
-        if(hist.length > 0) {
-            newBal += hist[hist.length - 1].amount;
-        }
-        if(hist.length == 0 && lastBuyerClaimedDay[user] == 0) {
+        // 최초 진입 시 클레임 시작점 표식
+        if (hist.length == 0 && lastBuyerClaimedDay[user] == 0) {
             lastBuyerClaimedDay[user] = UNSET;
         }
-        hist.push(BoxAmountCheckpoint({ day: effDay, amount: newBal }));
+        if (hist.length != 0) {
+            BoxAmountCheckpoint storage last = hist[hist.length - 1];
+            
+            if (last.day == effDay) {
+                // 같은 날이면 마지막 항목을 in-place로 누적 증가
+                last.amount += added;
+                return;
+            }
+            require(effDay > last.day, "non-monotonic effDay");
+            hist.push(BoxAmountCheckpoint({
+                day: effDay,
+                amount: last.amount + added
+            })); // 다음 날 이후면 누적값으로 새 체크포인트 추가
+        } else {
+            // 첫 체크포인트
+            hist.push(BoxAmountCheckpoint({
+                day: effDay,
+                amount: added
+            }));
+        }
     }
 
     /**
@@ -1539,13 +1709,27 @@ function backfillSendBoxAt(
      */
     function _pushRefCheckpoint(address user, uint256 effDay, uint256 added) internal {
         BoxAmountCheckpoint[] storage hist = referralAmountHistory[user];
-        uint256 newBal = added;
-        if (hist.length > 0) newBal += hist[hist.length - 1].amount;
-
+        // 최초 진입 시 클레임 시작점 표식
         if (hist.length == 0 && lastRefClaimedDay[user] == 0) {
             lastRefClaimedDay[user] = UNSET;
         }
-        hist.push(BoxAmountCheckpoint({ day: effDay, amount: newBal }));
+        if (hist.length != 0) {
+            BoxAmountCheckpoint storage last = hist[hist.length - 1];
+            if (last.day == effDay) {
+                last.amount += added;
+                return;
+            }
+            require(effDay > last.day, "non-monotonic effDay");
+            hist.push(BoxAmountCheckpoint({
+                day: effDay,
+                amount: last.amount + added
+            })); // 다음 날 이후면 누적값으로 새 체크포인트 추가
+        } else {
+            hist.push(BoxAmountCheckpoint({
+                day: effDay,
+                amount: added
+            }));
+        }
     }
 
     /**

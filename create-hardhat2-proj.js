@@ -32,6 +32,7 @@ fs.mkdirSync(path.join(projectPath, "foundry", "test"), { recursive: true });
 fs.mkdirSync(path.join(projectPath, "lib")); // forge install용
 
 // package.json 생성
+// hardhat-toolbox 버전: HH2에선 3.0.0이 안정적, HH3로 올릴경우 최신버전으로..
 console.log("📦 package.json 생성 중...");
 const packageJson = {
   name: projectName,
@@ -43,7 +44,7 @@ const packageJson = {
   },
   devDependencies: {
     hardhat: "^2.25.0",
-    "@nomicfoundation/hardhat-toolbox": "^6.0.0",
+    "@nomicfoundation/hardhat-toolbox": "^3.0.0",
     "@openzeppelin/contracts": "^5.3.0",
     dotenv: "^17.2.0"
   }

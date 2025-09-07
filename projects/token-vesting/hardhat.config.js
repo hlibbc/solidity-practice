@@ -2,6 +2,7 @@
 require("@nomicfoundation/hardhat-toolbox");
 require("dotenv").config({ path: require("path").resolve(__dirname, "./.env") });
 require("@typechain/hardhat");
+require("hardhat-contract-sizer");
 
 const { task } = require("hardhat/config");
 const { TASK_COMPILE } = require("hardhat/builtin-tasks/task-names");
@@ -15,6 +16,13 @@ module.exports = {
         enabled: true, runs: 200
       },
     },
+  },
+  contractSizer: {
+    alphaSort: true,
+    disambiguatePaths: false,
+    runOnCompile: false, // ← 컴파일할 때 자동 출력 비활성화
+    strict: false, // ← 초과 시 실패 원치 않으면 false
+    only: ["TokenVesting"], // 선택: 특정 컨트랙트만
   },
   networks: {
     development: { 

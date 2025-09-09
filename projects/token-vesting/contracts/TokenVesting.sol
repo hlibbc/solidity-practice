@@ -840,8 +840,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * APP에서 호출됨
      */
     function getTotalBoxPurchased() public view returns (uint256) {
-        if (lastSyncedDay == 0) {
-            // 아직 아무 날도 확정되지 않은 초기 구간
+        if (lastSyncedDay == 0) { // 아직 아무 날도 확정되지 않은 초기 구간
             return boxesAddedPerDay[0];
         }
         uint256 finalized = cumBoxes[lastSyncedDay - 1];        // 어제까지 확정 누적
@@ -852,6 +851,25 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         }
         return finalized + pending;
     }
+
+    /**
+     * @notice 레퍼럴로 구매된 총 박스 수 읽어오기
+     * @return 레퍼럴로 구매된 총 박스 수
+     * @dev sync가 호출되지 않은 최초 구간일 경우, referralsAddedPerDay[0] 반환
+     */
+    function getTotalReferralUnits() public view returns (uint256) {
+        if (lastSyncedDay == 0) {
+            return referralsAddedPerDay[0];
+        }
+        uint256 finalized = cumReferals[lastSyncedDay - 1];
+        uint256 todayIndex = (block.timestamp < vestingStartDate)? 0 : (block.timestamp - vestingStartDate) / SECONDS_PER_DAY;
+        uint256 pending = 0;
+        for (uint256 d = lastSyncedDay; d <= todayIndex; d++) {
+            pending += referralsAddedPerDay[d];
+        }
+        return finalized + pending;
+    }
+
 
     /**
      * @notice 현재 시점 기준 1박스 구매 가격 조회 (할인율 적용)
@@ -1915,7 +1933,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * - 구매량 증가에 따른 자동 등급 상승 시스템
      */
     function _upgradeBadgeIfNeeded(address user, uint256 tokenId) internal {
-        if (address(badgeSBT) == address(0) || tokenId == 0) return;
+        if (address(badgeSBT) == address(0) || tokenId == 0) {
+            return;
+        }
         uint256 total = totalBoughtBoxes[user];
         badgeSBT.upgradeBadgeByCount(tokenId, total);
         // 이벤트(선택): 현재 등급 조회해서 로깅

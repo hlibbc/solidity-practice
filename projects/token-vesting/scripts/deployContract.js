@@ -47,7 +47,7 @@ async function main() {
         1843430399n, // 2028.05.31 23:59:59
         1874966399n, // 2029.05.31 23:59:59
     ]; // inclusive
-    // 필요시 값 조정
+
     const BUYER_TOTALS = [
         ethers.parseUnits('170000000', 18),
         ethers.parseUnits('87500000', 18),
@@ -63,7 +63,7 @@ async function main() {
     // ─────────────────────────────────────────────────────────────
 
     // 기타 파라미터
-    const FORWARDER = process.env.FORWARDER_ADDRESS || ZERO;
+    const FORWARDER_ENV = process.env.FORWARDER_ADDRESS || ZERO;
     const STABLECOIN_ADDRESS = process.env.STABLECOIN_ADDRESS || ''; // 있으면 재사용
     const VESTING_TOKEN_ADDRESS = process.env.VESTING_TOKEN_ADDRESS || ''; // 선택
     const SBT_NAME = process.env.SBT_NAME || 'Badge';
@@ -85,16 +85,33 @@ async function main() {
     console.log('  - ENDS     :', ENDS.map(String));
     console.log('  - BUYER_TOTALS(18dec):', BUYER_TOTALS.map(String));
     console.log('  - REF_TOTALS  (18dec):', REF_TOTALS.map(String));
-    console.log('  - FORWARDER:', FORWARDER);
+    console.log('  - FORWARDER(env):', FORWARDER_ENV);
 
     try {
+        // 0) WhitelistForwarder 배포 or 재사용  ← (1) 요구사항
+        let fwdAddr = FORWARDER_ENV;
+        let forwarder;
+        if (!fwdAddr || fwdAddr === ZERO) {
+            console.log('\n0️⃣ WhitelistForwarder 배포 중...');
+            const Fwd = await ethers.getContractFactory('WhitelistForwarder', owner);
+            forwarder = await Fwd.deploy();
+            const depTxF = forwarder.deploymentTransaction();
+            await Shared.withGasLog('[deploy] WhitelistForwarder', Promise.resolve(depTxF), totals, 'deploy');
+            await forwarder.waitForDeployment();
+            fwdAddr = await forwarder.getAddress();
+            console.log('✅ WhitelistForwarder 배포 완료:', fwdAddr);
+            await waitIfNeeded();
+        } else {
+            console.log('\n0️⃣ WhitelistForwarder 배포 스킵. 기존 주소 사용:', fwdAddr);
+            forwarder = await ethers.getContractAt('WhitelistForwarder', fwdAddr, owner);
+        }
+
         // 1) StableCoin(USDT) 배포 or 재사용
         let stableAddr = STABLECOIN_ADDRESS;
         if (!stableAddr) {
             console.log('\n1️⃣ StableCoin(USDT) 배포 중...(contracts/Usdt.sol: StableCoin)');
             const Stable = await ethers.getContractFactory('StableCoin', owner);
             const stable = await Stable.deploy();
-            // 배포 트랜잭션 가스 로그
             const depTx1 = stable.deploymentTransaction();
             await Shared.withGasLog('[deploy] StableCoin', Promise.resolve(depTx1), totals, 'deploy');
             await stable.waitForDeployment();
@@ -116,15 +133,39 @@ async function main() {
         console.log('✅ BadgeSBT 배포 완료:', sbtAddr);
         await waitIfNeeded();
 
-        // 3) TokenVesting 배포
+        // 3) TokenVesting 배포 (constructor에 forwarder 주소 주입)  ← (2) 요구사항
         console.log('\n3️⃣ TokenVesting 배포 중...');
         const TV = await ethers.getContractFactory('TokenVesting', owner);
-        const vesting = await TV.deploy(FORWARDER, stableAddr, START_TS);
+        const vesting = await TV.deploy(fwdAddr, stableAddr, START_TS);
         const depTx3 = vesting.deploymentTransaction();
         await Shared.withGasLog('[deploy] TokenVesting', Promise.resolve(depTx3), totals, 'deploy');
         await vesting.waitForDeployment();
         const vestingAddr = await vesting.getAddress();
         console.log('✅ TokenVesting 배포 완료:', vestingAddr);
+        await waitIfNeeded();
+
+        // 3.5) Forwarder 설정: 화이트리스트 + buyBox 셀렉터 허용  ← (3)(4) 요구사항
+        console.log('\n3.5️⃣ Forwarder 정책 설정 (whitelist + setAllowed)...');
+        await Shared.withGasLog(
+            '[setup] forwarder.addToWhitelist(Vesting)',
+            forwarder.addToWhitelist(vestingAddr),
+            totals,
+            'setup'
+        );
+        console.log('    • addToWhitelist 완료');
+        await waitIfNeeded();
+
+        // selector 계산
+        const buyBoxSel = Shared.selectorForBuyBox(vesting.interface);
+
+        // 허용 등록
+        await Shared.withGasLog(
+            `[setup] forwarder.setAllowed(Vesting, buyBox=${buyBoxSel}, true)`,
+            forwarder.setAllowed(vestingAddr, buyBoxSel, true),
+            totals,
+            'setup'
+        );
+        console.log('    • setAllowed 완료 (selector:', buyBoxSel, ')');
         await waitIfNeeded();
 
         // 4) 스케줄 초기화
@@ -157,6 +198,7 @@ async function main() {
             console.log('\n6️⃣ vestingToken 설정은 스킵(미지정). 추후 setVestingToken으로 설정 가능.');
         }
 
+        // 6.5) (선택) recipient 설정
         let recipientAddr = null;
         const RECIPIENT_ADDR = process.env.RECIPIENT_ADDR || '';
         if (RECIPIENT_ADDR && RECIPIENT_ADDR !== ZERO) {
@@ -173,17 +215,39 @@ async function main() {
             console.log('\n6.5️⃣ recipient 설정 스킵(미지정). 추후 setRecipient으로 설정 가능.');
         }
 
+        // // 3.x) PermitAndBuyWrapper 배포
+        // console.log('\n3️⃣.9 PermitAndBuyWrapper 배포 중...');
+        // const Wrapper = await ethers.getContractFactory('PermitAndBuyWrapper', owner);
+        // const wrapper = await Wrapper.deploy(fwdAddr);
+        // await wrapper.waitForDeployment();
+        // const wrapperAddr = await wrapper.getAddress();
+        // console.log('✅ PermitAndBuyWrapper 배포 완료:', wrapperAddr);
+        // await waitIfNeeded();
+
+        // // Forwarder whitelist + setAllowed(wrapper.permitAndBuyBox)
+        // console.log('   • forwarder.addToWhitelist(Wrapper)');
+        // await forwarder.addToWhitelist(wrapperAddr);
+        // await waitIfNeeded();
+
+        // // selector 계산
+        // const frag = wrapper.interface.getFunction('permitAndBuyBox');
+        // const sel  = wrapper.interface.getSighash(frag); // e.g. 0x....
+        // console.log('   • setAllowed(Wrapper, permitAndBuyBox=', sel, ', true)');
+        // await forwarder.setAllowed(wrapperAddr, sel, true);
+        // await waitIfNeeded();
+
         // 7) 결과 저장
         const deploymentInfo = {
             network: (await provider.getNetwork()).toJSON?.() ?? await provider.getNetwork(),
             deployer: owner.address,
-            forwarder: FORWARDER,
+            forwarder: fwdAddr, // ← 실제 사용된 forwarder 주소로 저장
             startTs: START_TS.toString(),
             contracts: {
                 stableCoin: stableAddr,
                 badgeSBT: sbtAddr,
                 tokenVesting: vestingAddr,
                 vestingToken: VESTING_TOKEN_ADDRESS || null,
+                // permitAndBuyWrapper: wrapperAddr,
                 recipient: recipientAddr,
             },
             schedule: {
@@ -200,7 +264,6 @@ async function main() {
         const outFile = path.join(outDir, `deployment-info.json`);
         fs.writeFileSync(outFile, JSON.stringify(deploymentInfo, null, 2));
         console.log(`\n💾 배포 정보를 ${outFile} 에 저장했습니다.`);
-
         // ── 가스 요약
         Shared.printGasSummary(totals, ['deploy', 'setup']);
 

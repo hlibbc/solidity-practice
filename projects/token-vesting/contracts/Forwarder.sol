@@ -29,18 +29,13 @@ contract WhitelistForwarder is Ownable, ERC2771Forwarder {
     error NotWhitelisted(address target);
     
     /**
-     * @notice 에러: msg.sender가 Owner가 아님
-     */
-    error NotOwner();
-
-    /**
      * @notice 에러: 잘못된 주소 (null)
      */
     error InvalidAddress();
 
     /**
      * @notice 에러: 허용되지 않은 selector
-     * @param target 호출자 주소
+     * @param target 대상 컨트랙트(request.to)
      * @param selector 위임대납 요청한 selector
      */
     error SelectorNotAllowed(
@@ -156,85 +151,6 @@ contract WhitelistForwarder is Ownable, ERC2771Forwarder {
         emit AllowedFunctionSet(target, selector, allowed);
     }
 
-    function _execute(
-        ForwardRequestData calldata request,
-        bool requireValidRequest
-    ) internal override returns (bool success) {
-        // 0) 정책 검사: target whitelist + selector allowlist
-        bytes4 sel = _selectorOf(request.data);
-        bool policyOk = whitelist[request.to] && isAllowed[request.to][sel];
-
-        if (!policyOk) {
-            if (requireValidRequest) {
-                // 단건 execute(): 명확히 revert
-                if (!whitelist[request.to]) revert NotWhitelisted(request.to);
-                revert SelectorNotAllowed(request.to, sel);
-            } else {
-                // 배치 executeBatch(): invalid로 간주 → false 반환하여 스킵/환불 시맨틱 유지
-                return false;
-            }
-        }
-
-        // 1) 기본 유효성 검사 (Trusted target / deadline / signer)
-        (bool isTrustedByTarget, bool active, bool signerMatch, address signer) = _validate(request);
-        if (!(isTrustedByTarget && active && signerMatch)) {
-            if (requireValidRequest) {
-                if (!isTrustedByTarget) revert ERC2771UntrustfulTarget(request.to, address(this));
-                if (!active) revert ERC2771ForwarderExpiredRequest(request.deadline);
-                revert ERC2771ForwarderInvalidSigner(signer, request.from);
-            } else {
-                return false;
-            }
-        }
-
-        // 2) nonce 소모
-        uint256 currentNonce = _useNonce(signer);
-
-        // 3) 대상 호출 (EIP-2771: from을 data 뒤에 붙임)
-        uint256 reqGas = request.gas;
-        address to = request.to;
-        uint256 value = request.value;
-        bytes memory data = abi.encodePacked(request.data, request.from);
-
-        bytes memory ret;
-        uint256 gasLeftAfter;
-        assembly {
-            // call(gas, to, value, in, insize, out, outsize)
-            success := call(reqGas, to, value, add(data, 0x20), mload(data), 0, 0)
-            let size := returndatasize()
-            ret := mload(0x40)
-            mstore(0x40, add(ret, add(size, 0x20)))
-            mstore(ret, size)
-            returndatacopy(add(ret, 0x20), 0, size)
-            gasLeftAfter := gas()
-        }
-
-        // 4) EIP-150 가스 보장: reqGas/63 보다 남은 가스가 적으면 invalid()로 소모
-        if (gasLeftAfter < reqGas / 63) {
-            assembly {
-                invalid()
-            }
-        }
-
-        // 5) 이벤트 (OZ와 동일한 시그니처)
-        emit ExecutedForwardRequest(signer, currentNonce, success);
-
-        // 6) 실패 처리
-        if (!success) {
-            if (requireValidRequest) {
-                // 단건 execute(): 대상 컨트랙트 revert 데이터를 "그대로" 버블링
-                assembly {
-                    revert(add(ret, 0x20), mload(ret))
-                }
-            } else {
-                // 배치 executeBatch(): false 반환 → 상위에서 환불 시맨틱 처리
-                return false;
-            }
-        }
-
-        return true;
-    }
-    
     /**
      * @notice 화이트리스트 검증을 추가한 execute 함수
      * @param request ForwardRequestData 구조체
@@ -242,37 +158,41 @@ contract WhitelistForwarder is Ownable, ERC2771Forwarder {
     function execute(
         ForwardRequestData calldata request
     ) public payable override {
-        if (!whitelist[request.to]) { // check: whitelist 
-            revert NotWhitelisted(request.to);
-        }
-        if (msg.value != request.value) { // check: msg.value
+        // 0) value 일치
+        if (msg.value != request.value) {
             revert ERC2771ForwarderMismatchedValue(request.value, msg.value);
         }
-        (bool isTrustedByTarget, bool active, bool signerMatch, address signer) = _validate(request);
-        if (!isTrustedByTarget) {
+        // 1) 정책 검사: target whitelist + selector allowlist
+        bytes4 sel = _selectorOf(request.data);
+        if(!whitelist[request.to]) {
+            revert NotWhitelisted(request.to);
+        }
+        if(!isAllowed[request.to][sel]) {
+            revert SelectorNotAllowed(request.to, sel);
+        }
+        // 2) 유효성 검사 (Trusted / deadline / signer)
+        (bool isTrusted, bool active, bool signerMatch, address signer) = _validate(request);
+        if(!isTrusted) {
             revert ERC2771UntrustfulTarget(request.to, address(this));
         }
-        if (!active) {
+        if(!active) {
             revert ERC2771ForwarderExpiredRequest(request.deadline);
         }
-        if (!signerMatch) {
+        if(!signerMatch) {
             revert ERC2771ForwarderInvalidSigner(signer, request.from);
         }
-        bytes4 extractedSelector = _selectorOf(request.data);
-        if(!isAllowed[request.to][extractedSelector]) {
-            revert SelectorNotAllowed(request.to, extractedSelector);
-        }
+        // 3) nonce 소모
         uint256 currentNonce = _useNonce(signer);
+        // 4) 대상 호출 (EIP-2771)
         uint256 reqGas = request.gas;
         address to = request.to;
         uint256 value = request.value;
-        bytes memory data = abi.encodePacked(request.data, request.from); // feat. EIP-2771
-        // For parse returndata
+        bytes memory data = abi.encodePacked(request.data, request.from);
+
         bool success;
-        bytes memory ret;
         uint256 gasLeftAfter;
+        bytes memory ret;
         assembly {
-            // call(gas, to, value, in, insize, out, outsize)
             success := call(reqGas, to, value, add(data, 0x20), mload(data), 0, 0)
             let size := returndatasize()
             ret := mload(0x40)
@@ -281,20 +201,16 @@ contract WhitelistForwarder is Ownable, ERC2771Forwarder {
             returndatacopy(add(ret, 0x20), 0, size)
             gasLeftAfter := gas()
         }
-        // === EIP-150 기반 가스 전달 보증 체크(원본 _checkForwardedGas 동치) ===
-        // 남은 가스가 req.gas/63 보다 작다면 invalid()로 모든 가스 소모
-        if (gasLeftAfter < request.gas / 63) {
-            assembly {
-                invalid()
-            }
+        // 5) EIP-150 가스 보장: 요청가스/63 보다 남으면 전체 롤백(데이터 없음)
+        if (gasLeftAfter < reqGas / 63) {
+            assembly { invalid() }
         }
-        emit ExecutedForwardRequest(signer, currentNonce, success); // 원본 이벤트와 동일하게 기록
-        if (!success) { // 실패 시 대상의 revert 데이터를 "그대로" 버블링
-            assembly {
-                revert(add(ret, 0x20), mload(ret))
-            }
+        // 6) 이벤트 (OZ와 동일)
+        emit ExecutedForwardRequest(signer, currentNonce, success);
+        // 7) 실패면 타깃의 revert 데이터를 그대로 버블링
+        if (!success) {
+            assembly { revert(add(ret, 0x20), mload(ret)) }
         }
-        // 성공 시에는 아무 것도 하지 않음(원본과 동일)
     }
 
     /**
@@ -303,11 +219,34 @@ contract WhitelistForwarder is Ownable, ERC2771Forwarder {
      * @return sel 추출된 selector
      */
     function _selectorOf(bytes calldata data) internal pure returns (bytes4 sel) {
-        if (data.length >= 4) {
-            // 첫 4바이트가 함수 셀렉터
-            assembly { sel := calldataload(data.offset) }
-        } else {
-            sel = bytes4(0); // receive/fallback 등
-        }
+        // if (data.length >= 4) {
+        //     assembly {
+        //         sel := shr(224, calldataload(add(data.offset, 32)))
+        //     }
+        // } else {
+        //     sel = bytes4(0); // fallback/receive (기본 비허용)
+        // }
+        if (data.length < 4) return 0x00000000;
+        // 가장 안전한 방법: 앞 4바이트 슬라이스
+        return bytes4(data[0:4]);
+    }
+
+    /**
+     * @dev req.data(=calldata)에 대해 forwarder가 인식하는 selector를 그대로 반환
+     */
+    function debugSelector(bytes calldata data) external pure returns (bytes4) {
+        return _selectorOf(data);
+    }
+
+    /**
+     * @dev (to, data) 기준으로 selector와 isAllowed 값을 함께 반환
+     */
+    function debugAllowed(address to, bytes calldata data)
+        external
+        view
+        returns (bytes4 sel, bool allowed)
+    {
+        sel = _selectorOf(data);
+        allowed = isAllowed[to][sel]; // 여러분 컨트랙트의 맵 이름에 맞춰 수정
     }
 }

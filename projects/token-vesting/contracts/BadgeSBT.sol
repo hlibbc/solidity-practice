@@ -11,36 +11,55 @@ import "./interface/IERC5484.sol";
  * @title BadgeSBT - 등급 기반 Soulbound Token
  * @notice 
  * - 비양도(transfer 불가), 민트/번만 허용하는 Soulbound Token
- * - 구매량에 따른 등급 시스템 (Goldfish → Gamulchi → Shark → Whale)
+ * - 구매량에 따른 등급 시스템 (Sprout → Cloud → Airplane → Rocket → SpaceStation → Moon)
  * - EIP-5192: locked(tokenId)=true, mint 시 Locked 이벤트 발생
  * - EIP-5484: Issued 이벤트 & 토큰별 BurnAuth 고정
  * - 등급별 메타데이터 URI 자동 업데이트
  * @dev OpenZeppelin Contracts v5.x 기반
  */
 contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
-    // ===== Custom errors =====
+    // def. Error
     error SBT_TransferNotAllowed();
     error SBT_ApprovalNotAllowed();
     error SBT_BurnNotAuthorized();
     error NotAdmin(address caller);
     error InvalidTier();
 
-    // ===== Tier =====
-    // 한글 표기는 주석으로만, 온체인 enum은 영문으로 둡니다.
-    enum Tier { None, Goldfish /*금붕어*/, Gamulchi /*가물취*/, Shark /*상어*/, Whale /*고래*/ }
+    // def. enum
+    /**
+     * @notice SBT 등급 정의 열거형 상수
+     * @dev
+     * - Sprout: 1 ~ 4
+     * - Cloud: 5 ~ 9
+     * - Airplane: 10 ~ 19
+     * - Rocket: 20 ~ 49
+     * - SpaceStation: 50 ~ 99
+     * - Moon: 100 ~
+     */
+    enum Tier { 
+        None, 
+        Sprout,
+        Cloud,
+        Airplane, 
+        Rocket, 
+        SpaceStation, 
+        Moon
+    }
 
     // 등급 기준(개수)
-    uint256 private constant TIER_GOLDFISH_MAX  = 1000;   // <1000
-    uint256 private constant TIER_GAMULCHI_MAX  = 10000;  // <10000
-    uint256 private constant TIER_SHARK_MAX     = 20000;  // <20000
-    // >=20000 -> Whale
+    uint256 private constant TIER_SPROUT_MAX  = 5; 
+    uint256 private constant TIER_CLOUD_MAX  = 10; 
+    uint256 private constant TIER_AIRPLANE_MAX  = 20; 
+    uint256 private constant TIER_ROCKET_MAX  = 50; 
+    uint256 private constant TIER_SSTATION_MAX  = 100; 
 
-    // 등급별 메타데이터 URI(상수로 '박아두기')
-    // 실제 값으로 교체하세요.
-    string private constant URI_GOLDFISH = "ipfs://.../goldfish.json";
-    string private constant URI_GAMULCHI = "ipfs://.../gamulchi.json";
-    string private constant URI_SHARK    = "ipfs://.../shark.json";
-    string private constant URI_WHALE    = "ipfs://.../whale.json";
+    // 등급별 메타데이터 URI
+    string private constant URI_SPROUT = "ipfs://.../sprout.json";
+    string private constant URI_CLOUD = "ipfs://.../cloud.json";
+    string private constant URI_AIRPLANE = "ipfs://.../airplane.json";
+    string private constant URI_ROCKET = "ipfs://.../rocket.json";
+    string private constant URI_SPACESTATION = "ipfs://.../sstation.json";
+    string private constant URI_MOON = "ipfs://.../moon.json";
 
     // 이벤트(선택) — 업그레이드 추적용
     event BadgeUpgraded(uint256 indexed tokenId, Tier from, Tier to, string uri);
@@ -230,7 +249,7 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
      */
     function upgradeBadge(uint256 tokenId, Tier newTier) external onlyAdmin {
         _requireOwned(tokenId);
-        if (newTier == Tier.None || uint8(newTier) > uint8(Tier.Whale)) revert InvalidTier();
+        if (newTier == Tier.None || uint8(newTier) > uint8(Tier.Moon)) revert InvalidTier();
         _upgradeBadge(tokenId, newTier);
     }
 
@@ -261,16 +280,30 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
      * @param n 누적 구매 박스 수량
      * @return 해당 수량에 맞는 등급
      * @dev 
-     * - Whale: >= 20,000개
-     * - Shark: [10,000, 19,999]개
-     * - Gamulchi: [1,000, 9,999]개
-     * - Goldfish: [0, 999]개
+     * - Sprout: 1 ~ 4
+     * - Cloud: 5 ~ 9
+     * - Airplane: 10 ~ 19
+     * - Rocket: 20 ~ 49
+     * - SpaceStation: 50 ~ 99
+     * - Moon: 100 ~
      */
     function _tierFromCount(uint256 n) internal pure returns (Tier) {
-        if (n >= TIER_SHARK_MAX) return Tier.Whale;                // >= 20000
-        if (n >= TIER_GAMULCHI_MAX) return Tier.Shark;             // [10000, 19999]
-        if (n >= TIER_GOLDFISH_MAX) return Tier.Gamulchi;          // [1000, 9999]
-        return Tier.Goldfish;                                      // [0, 999]
+        if (n >= TIER_SPROUT_MAX) {
+            return Tier.Cloud;
+        }
+        if (n >= TIER_CLOUD_MAX) {
+            return Tier.Airplane;
+        }
+        if (n >= TIER_AIRPLANE_MAX) {
+            return Tier.Rocket;
+        }
+        if (n >= TIER_ROCKET_MAX) {
+            return Tier.SpaceStation;
+        }
+        if (n >= TIER_SSTATION_MAX) {
+            return Tier.Moon;
+        }
+        return Tier.Sprout;
     }
 
     /**
@@ -283,10 +316,24 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
      * - URI는 상수로 하드코딩되어 있음
      */
     function _uriForTier(Tier t) internal pure returns (string memory) {
-        if (t == Tier.Goldfish) return URI_GOLDFISH;
-        if (t == Tier.Gamulchi) return URI_GAMULCHI;
-        if (t == Tier.Shark)    return URI_SHARK;
-        if (t == Tier.Whale)    return URI_WHALE;
+        if (t == Tier.Sprout) {
+            return URI_SPROUT;
+        }
+        if (t == Tier.Cloud) {
+            return URI_CLOUD;
+        }
+        if (t == Tier.Airplane) {
+            return URI_AIRPLANE;
+        }
+        if (t == Tier.Rocket) {
+            return URI_ROCKET;
+        }
+        if (t == Tier.SpaceStation) {
+            return URI_SPACESTATION;
+        }
+        if (t == Tier.Moon) {
+            return URI_MOON;
+        }
         revert InvalidTier();
     }
 

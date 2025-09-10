@@ -492,74 +492,6 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     }
 
     /**
-     * @notice 과거 구매를 한 건 추가(백필)한다 - 관리자 전용
-     * @param buyer 구매자 주소
-     * @param refCodeStr 추천인 레퍼럴 '문자열 코드'
-     * @param boxCount 구매한 박스 수량
-     * @param purchaseTs 구매 시점 타임스탬프
-     * @param paidUnits 결제된 StableCoin 금액 (최소 단위)
-     * @param creditBuyback 바이백을 적립할지 여부
-     * @dev 
-     * - onlyOwner만 호출 가능
-     * - 이미 확정된 날짜에는 백필 불가 (d >= lastSyncedDay)
-     * - 구매 시점의 타임스탬프를 기준으로 해당 일자에 배치
-     * - 레퍼럴이 있는 경우 바이백도 함께 처리
-     * - refCodeStr == ""  → 레퍼럴 없음으로 처리(address(0))
-     * - refCodeStr != "" → _referrerFromString으로 소유자 조회(없으면 revert "ref code not found")
-     */
-    // function backfillPurchaseAt(
-    //     address buyer,
-    //     string calldata refCodeStr,
-    //     uint256 boxCount,
-    //     uint256 purchaseTs,
-    //     uint256 paidUnits,
-    //     bool    creditBuyback
-    // ) external onlyOwner {
-    //     require(scheduleInitialized, "no schedule");
-    //     require(boxCount > 0, "box=0");
-
-    //     uint256 d = (purchaseTs < vestingStartDate)
-    //         ? 0
-    //         : (purchaseTs - vestingStartDate) / SECONDS_PER_DAY;
-
-    //     require(d >= lastSyncedDay, "day finalized");
-
-    //     // 0) 레퍼럴 문자열 → 주소/bytes8로 해석 (빈 문자열이면 없음)
-    //     address referrer = address(0);
-    //     bytes8  refCode  = bytes8(0);
-    //     if (bytes(refCodeStr).length != 0) {
-    //         (referrer, refCode) = _referrerFromString(refCodeStr); // 없으면 revert
-    //     }
-
-    //     // 1) 스토리지 반영 - 일별 데이터 업데이트
-    //     boxesAddedPerDay[d] += boxCount;
-    //     _pushBuyerCheckpoint(buyer, d, boxCount);
-
-    //     uint256 buyback = 0;
-    //     if (referrer != address(0)) {
-    //         referralsAddedPerDay[d] += boxCount;
-    //         _pushRefCheckpoint(referrer, d, boxCount);
-
-    //         if (creditBuyback && paidUnits > 0) {
-    //             buyback = (paidUnits * BUYBACK_PERCENT) / 100;
-    //             buybackUSDT[referrer] += buyback;
-    //         }
-    //     }
-
-    //     // 2) 코드 보장(존재 없으면 자동 생성) — 구매자/추천인 각각
-    //     _ensureReferralCode(buyer);
-    //     if (referrer != address(0)) {
-    //         _ensureReferralCode(referrer);
-    //     }
-
-    //     // 3) 구매 이벤트 emit (referrer 없으면 0, 코드도 0)
-    //     emit BoxesPurchased(buyer, boxCount, referrer, paidUnits, buyback, refCode);
-
-    //     totalBoughtBoxes[buyer] += boxCount;
-    //     uint256 sbtId = _ensureSbt(buyer);
-    //     _upgradeBadgeIfNeeded(buyer, sbtId);
-    // }
-    /**
      * @notice 과거 구매 백필 벌크 처리 (바이백 적립 없음)
      * @dev
      * - onlyOwner
@@ -615,62 +547,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
             unchecked { ++i; }
         }
     }
-
-    // /**
-    // * @notice [관리자 전용] 과거 시점 기준 박스 소유권 이전 백필
-    // * @param from    이전자
-    // * @param to      수령자
-    // * @param boxCount 이전 수량
-    // * @param transferTs '이전 발생 시각' (Unix ts). 실제 효력은 다음 날(effDay)부터.
-    // * @dev
-    // * - 구매/판매 기록(cumBoxes, boxesAddedPerDay, referralsAddedPerDay, totalBoughtBoxes 등) 변경 없음
-    // * - 확정된 날짜 이전으로는 백필 불가: purchase와 동일하게 d >= lastSyncedDay 요구
-    // * - effDay = d + 1 (d = (transferTs - vestingStartDate)/86400, transferTs < start면 d=0)
-    // * - from의 d일 기준 보유량 스냅샷이 boxCount 이상이어야 함
-    // * - from: effDay에 '절대값' 체크포인트로 감소 반영
-    // * - to  : effDay에 누적 증가 체크포인트(_pushBuyerCheckpoint) 반영
-    // */
-    // function backfillSendBoxAt(
-    //     address from,
-    //     address to,
-    //     uint256 boxCount,
-    //     uint256 transferTs
-    // ) external onlyOwner {
-    //     require(scheduleInitialized, "no schedule");
-    //     require(from != address(0) && to != address(0), "zero");
-    //     require(from != to, "same");
-    //     require(boxCount > 0, "box=0");
-
-    //     uint256 d = (transferTs < vestingStartDate)? 0 : (transferTs - vestingStartDate) / SECONDS_PER_DAY;
-    //     // 확정된 날짜 이전으로는 백필 불가
-    //     require(d >= lastSyncedDay, "day finalized");
-
-    //     uint256 effDay = d + 1;
-    //     // ── from(보낸 사람) 절대값 누적 차감(in-place)
-    //     BoxAmountCheckpoint[] storage sHist = buyerBoxAmountHistory[from];
-    //     // base: (같은 effDay 마지막 CP가 있으면 그 amount, 없으면 '해당 d 기준 보유량')
-    //     uint256 base = _balanceAtDay(buyerBoxAmountHistory[from], d);
-    //     if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
-    //         base = sHist[sHist.length - 1].amount;
-    //     }
-    //     require(base >= boxCount, "insufficient after prior transfers");
-
-    //     uint256 newFromBal = base - boxCount;
-    //     if (sHist.length == 0 && lastBuyerClaimedDay[from] == 0) {
-    //         lastBuyerClaimedDay[from] = UNSET;
-    //     }
-    //     if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
-    //         sHist[sHist.length - 1].amount = newFromBal; // in-place 수정
-    //     } else {
-    //         sHist.push(BoxAmountCheckpoint({ day: effDay, amount: newFromBal }));
-    //     }
-    //     // ── to(받는 사람) 누적 증가(구매와 동일 가산 로직)
-    //     _pushBuyerCheckpoint(to, effDay, boxCount);
-    //     // 수령자 레퍼럴 코드 보장(선택)
-    //     _ensureReferralCode(to);
-
-    //     emit BoxesTransferred(from, to, boxCount);
-    // }
+    
     /**
      * @notice 과거 시점 기준 박스 소유권 이전 백필 벌크 처리
      * @dev
@@ -963,8 +840,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * APP에서 호출됨
      */
     function getTotalBoxPurchased() public view returns (uint256) {
-        if (lastSyncedDay == 0) {
-            // 아직 아무 날도 확정되지 않은 초기 구간
+        if (lastSyncedDay == 0) { // 아직 아무 날도 확정되지 않은 초기 구간
             return boxesAddedPerDay[0];
         }
         uint256 finalized = cumBoxes[lastSyncedDay - 1];        // 어제까지 확정 누적
@@ -975,6 +851,25 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         }
         return finalized + pending;
     }
+
+    /**
+     * @notice 레퍼럴로 구매된 총 박스 수 읽어오기
+     * @return 레퍼럴로 구매된 총 박스 수
+     * @dev sync가 호출되지 않은 최초 구간일 경우, referralsAddedPerDay[0] 반환
+     */
+    function getTotalReferralUnits() public view returns (uint256) {
+        if (lastSyncedDay == 0) {
+            return referralsAddedPerDay[0];
+        }
+        uint256 finalized = cumReferals[lastSyncedDay - 1];
+        uint256 todayIndex = (block.timestamp < vestingStartDate)? 0 : (block.timestamp - vestingStartDate) / SECONDS_PER_DAY;
+        uint256 pending = 0;
+        for (uint256 d = lastSyncedDay; d <= todayIndex; d++) {
+            pending += referralsAddedPerDay[d];
+        }
+        return finalized + pending;
+    }
+
 
     /**
      * @notice 현재 시점 기준 1박스 구매 가격 조회 (할인율 적용)
@@ -2038,7 +1933,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * - 구매량 증가에 따른 자동 등급 상승 시스템
      */
     function _upgradeBadgeIfNeeded(address user, uint256 tokenId) internal {
-        if (address(badgeSBT) == address(0) || tokenId == 0) return;
+        if (address(badgeSBT) == address(0) || tokenId == 0) {
+            return;
+        }
         uint256 total = totalBoughtBoxes[user];
         badgeSBT.upgradeBadgeByCount(tokenId, total);
         // 이벤트(선택): 현재 등급 조회해서 로깅
@@ -2103,5 +2000,10 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      */
     function _contextSuffixLength() internal pure override(Context, ERC2771Context) returns (uint256) {
         return 20;
+    }
+
+    uint public temp;
+    function testFunc() public {
+        temp++;
     }
 }

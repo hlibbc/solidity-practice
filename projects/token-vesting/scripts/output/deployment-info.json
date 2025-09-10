@@ -1,17 +1,17 @@
 {
   "network": {
     "name": "unknown",
-    "chainId": "20250616"
+    "chainId": "31337"
   },
-  "deployer": "0x20f7F90c243c556460388cc227C285952CA3Ea9d",
-  "forwarder": "0x0000000000000000000000000000000000000000",
+  "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "forwarder": "0x34B40BA116d5Dec75548a9e9A8f15411461E8c70",
   "startTs": "1748822400",
   "contracts": {
-    "stableCoin": "0x144e1d78D58AfA8D97bd5721dFA6a4b15d2915b9",
-    "badgeSBT": "0x315F4476Ce28b3E3b7bcEB1Be7Dc00DE5fF84544",
-    "tokenVesting": "0xdF1689F2E1C562E593C362268dDC17C65337E902",
+    "stableCoin": "0xD0141E899a65C95a556fE2B27e5982A6DE7fDD7A",
+    "badgeSBT": "0x07882Ae1ecB7429a84f1D53048d35c4bB2056877",
+    "tokenVesting": "0x22753E4264FDDc6181dc7cce468904A80a363E44",
     "vestingToken": null,
-    "recipient": "0x20f7F90c243c556460388cc227C285952CA3Ea9d"
+    "recipient": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
   },
   "schedule": {
     "ends": [
@@ -33,6 +33,6 @@
       "0"
     ]
   },
-  "time": "2025-09-07T10:21:51.321Z",
-  "blockNumber": 2643853
+  "time": "2025-09-10T01:37:05.996Z",
+  "blockNumber": 120
 }

@@ -59,11 +59,16 @@ async function main() {
     const purch18 = await vesting.previewBuyerClaimable(user);
     console.log("✅ 청구 가능한 토큰 수량 조회 완료");
 
+    const totalBoxes = await vesting.getTotalBoxPurchased();   // 전체 누적
+    const userBoxes  = await vesting.boxesOf(user);            // 사용자 현재 보유
+
     // === 결과 출력 ===
     console.log("\n=== Buyer Claimable (현재 시점) ===");
     console.log("🌐 네트워크    :", d.network?.name || process.env.HARDHAT_NETWORK || "unknown");
     console.log("🔗 Vesting    :", d.vesting);             // ⬅ 여기!
     console.log("👤 사용자     :", user);
+    console.log("📦 총 박스량  :", totalBoxes.toString());     // ← 추가 출력
+    console.log("📦 사용자 박스:", userBoxes.toString());      // ← 추가 출력
     console.log("💰 amount18   :", purch18.toString());
     
     // 6자리 소수점 단위로 내림 처리된 값과 ETH 단위로 변환된 값 출력

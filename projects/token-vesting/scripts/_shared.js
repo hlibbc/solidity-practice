@@ -241,6 +241,39 @@ async function withGasLog(prefix, txPromise, totals, bucket) {
 }
 
 // =============================================================================
+// selector 추출
+// =============================================================================
+/**
+ * 임의 인자로 encode해서 앞 4바이트(셀렉터)만 슬라이스하는 범용 헬퍼
+ * @param {ethers.Interface} iface
+ * @param {string} fnName
+ * @param {any[]} exampleArgs  // encodeFunctionData에 넣을 더미 인자
+ * @returns {string} "0x" + 8 hex
+ */
+function selectorFromEncode(iface, fnName, exampleArgs) {
+    const encoded = iface.encodeFunctionData(fnName, exampleArgs);
+    return encoded.slice(0, 10);
+}
+
+/**
+ * TokenVesting.buyBox 전용 셀렉터 헬퍼
+ * buyBox(uint256,string,(uint256,uint256,uint8,bytes32,bytes32))
+ */
+function selectorForBuyBox(iface) {
+    const dummyPermit = { value: 0n, deadline: 0n, v: 0, r: ethers.ZeroHash, s: ethers.ZeroHash };
+    return selectorFromEncode(iface, 'buyBox', [0n, 'ABCDEFGH', dummyPermit]);
+}
+
+/**
+ * TokenVesting.testFunc 전용 셀렉터 헬퍼
+ * testFunc()
+ */
+function selectorForTestFunc(iface) {
+    return selectorFromEncode(iface, 'testFunc', []);
+}
+
+
+// =============================================================================
 /* 모듈 내보내기 */
 // =============================================================================
 
@@ -263,4 +296,9 @@ module.exports = {
     addGasTotals,
     printGasSummary,
     withGasLog,
+
+    // selector 추출
+    selectorFromEncode,
+    selectorForBuyBox,
+    selectorForTestFunc
 };

@@ -157,6 +157,7 @@ async function main() {
 
         // selector 계산
         const buyBoxSel = Shared.selectorForBuyBox(vesting.interface);
+        const testFuncSel = Shared.selectorForTestFunc(vesting.interface);
 
         // 허용 등록
         await Shared.withGasLog(
@@ -166,6 +167,16 @@ async function main() {
             'setup'
         );
         console.log('    • setAllowed 완료 (selector:', buyBoxSel, ')');
+        await waitIfNeeded();
+
+        // 허용 등록 (testFunc)
+        await Shared.withGasLog(
+            `[setup] forwarder.setAllowed(Vesting, testFunc=${testFuncSel}, true)`,
+            forwarder.setAllowed(vestingAddr, testFuncSel, true),
+            totals,
+            'setup'
+        );
+        console.log('    • setAllowed 완료 (testFunc selector:', testFuncSel, ')');
         await waitIfNeeded();
 
         // 4) 스케줄 초기화
@@ -214,27 +225,6 @@ async function main() {
         } else {
             console.log('\n6.5️⃣ recipient 설정 스킵(미지정). 추후 setRecipient으로 설정 가능.');
         }
-
-        // // 3.x) PermitAndBuyWrapper 배포
-        // console.log('\n3️⃣.9 PermitAndBuyWrapper 배포 중...');
-        // const Wrapper = await ethers.getContractFactory('PermitAndBuyWrapper', owner);
-        // const wrapper = await Wrapper.deploy(fwdAddr);
-        // await wrapper.waitForDeployment();
-        // const wrapperAddr = await wrapper.getAddress();
-        // console.log('✅ PermitAndBuyWrapper 배포 완료:', wrapperAddr);
-        // await waitIfNeeded();
-
-        // // Forwarder whitelist + setAllowed(wrapper.permitAndBuyBox)
-        // console.log('   • forwarder.addToWhitelist(Wrapper)');
-        // await forwarder.addToWhitelist(wrapperAddr);
-        // await waitIfNeeded();
-
-        // // selector 계산
-        // const frag = wrapper.interface.getFunction('permitAndBuyBox');
-        // const sel  = wrapper.interface.getSighash(frag); // e.g. 0x....
-        // console.log('   • setAllowed(Wrapper, permitAndBuyBox=', sel, ', true)');
-        // await forwarder.setAllowed(wrapperAddr, sel, true);
-        // await waitIfNeeded();
 
         // 7) 결과 저장
         const deploymentInfo = {

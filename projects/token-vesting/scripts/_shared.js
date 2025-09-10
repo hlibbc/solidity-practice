@@ -264,6 +264,14 @@ function selectorForBuyBox(iface) {
     return selectorFromEncode(iface, 'buyBox', [0n, 'ABCDEFGH', dummyPermit]);
 }
 
+/**
+ * TokenVesting.testFunc 전용 셀렉터 헬퍼
+ * testFunc()
+ */
+function selectorForTestFunc(iface) {
+    return selectorFromEncode(iface, 'testFunc', []);
+}
+
 
 // =============================================================================
 /* 모듈 내보내기 */
@@ -291,5 +299,6 @@ module.exports = {
 
     // selector 추출
     selectorFromEncode,
-    selectorForBuyBox
+    selectorForBuyBox,
+    selectorForTestFunc
 };

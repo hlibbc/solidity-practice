@@ -1417,7 +1417,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     function _yearByTs(uint256 dayStartTs) internal view returns (uint256) {
         uint256 n = poolEndTimes.length;
         for (uint256 i = 0; i < n; i++) {
-            if (dayStartTs <= poolEndTimes[i]) return i;
+            if (dayStartTs <= poolEndTimes[i]) {
+                return i;
+            }
         }
         return n; // beyond schedule
     }
@@ -1433,12 +1435,17 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * - 구매자 풀과 추천인 풀을 구분하여 계산
      */
     function _dailyPoolRawByTs(uint256 dayStartTs, bool forBuyer) internal view returns (uint256) {
-        if (!scheduleInitialized) return 0;
+        if (!scheduleInitialized) {
+            return 0;
+        }
         uint256 y = _yearByTs(dayStartTs);
-        if (y >= poolEndTimes.length) return 0;
-
+        if (y >= poolEndTimes.length) {
+            return 0;
+        }
         uint256 total = forBuyer ? buyerPools[y] : refererPools[y];
-        if (total == 0) return 0;
+        if (total == 0) {
+            return 0;
+        }
 
         uint256 yStart = _yearStartTs(y);
         uint256 inYear = (dayStartTs - yStart) / SECONDS_PER_DAY; // 0..termDays-1

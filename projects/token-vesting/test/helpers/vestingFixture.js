@@ -91,6 +91,12 @@ async function deployFixture() {
     // === 테스트용 서명자들 획득 ===
     const [owner, buyer, referrer, other, ...rest] = await ethers.getSigners();
 
+    // === forwarder 배포 ===
+    const Fwd = await ethers.getContractFactory('WhitelistForwarder', owner);
+    const forwarder = await Fwd.deploy();
+    await forwarder.waitForDeployment();
+    let fwdAddr = await forwarder.getAddress();
+
     // === StableCoin 배포 ===
     const StableCoin = await ethers.getContractFactory("StableCoin");
     const stableCoin = await StableCoin.deploy();
@@ -102,10 +108,12 @@ async function deployFixture() {
     // === TokenVesting 배포 (새 생성자: forwarder, stableCoin, start) ===
     const TV = await ethers.getContractFactory("TokenVesting");
     const vesting = await TV.deploy(
-        ethers.ZeroAddress,                    // forwarder: 메타 트랜잭션용 (현재 미사용)
+        fwdAddr,                    // forwarder: 메타 트랜잭션용 (현재 미사용)
         await stableCoin.getAddress(),         // stableCoin: USDT 컨트랙트 주소
         start                                  // start: 베스팅 시작 시각
     );
+    await vesting.waitForDeployment();
+
 
     // === BadgeSBT 배포: admin = vesting (mint/upgrade가 onlyAdmin이므로) ===
     const BadgeSBT = await ethers.getContractFactory("BadgeSBT");
@@ -114,9 +122,11 @@ async function deployFixture() {
         "BDG",                                 // symbol: SBT 토큰 심볼
         await vesting.getAddress()             // admin: 베스팅 컨트랙트가 SBT 관리
     );
+    await sbt.waitForDeployment();
 
     // === TokenVesting에 SBT 주소 연결 ===
-    await vesting.setBadgeSBT(await sbt.getAddress());
+    (await vesting.setBadgeSBT(await sbt.getAddress())).wait();
+    (await sbt.connect(owner).setAdmin(await vesting.getAddress())).wait();
 
     // === 베스팅 스케줄 초기화 ===
     // 4년간의 베스팅 계획: 각 년도별 종료 시각
@@ -163,8 +173,18 @@ async function deployFixture() {
      *  // referrer가 "SPLALABS" 코드를 가지게 됨
      */
     async function seedReferralFor(signer) {
-        const code = "SPLALABS";
-        await vesting.setReferralCode(signer.address, code, true);
+        // 컨트랙트의 onlyOwner 함수이므로 "owner" 권한 계정으로 호출해야 합니다.
+        const owner = vesting.runner; // 이미 owner로 연결돼 있다면 그대로 사용
+        // 필요 시: const owner = vesting.connect(deployerSigner);
+
+        const code = "SPLALABS"; // 8자, A-Z/0-9만 허용
+        const users = [await signer.getAddress()];
+        const codes = [code];
+        const overwrite = true;
+
+        const tx = await vesting.connect(owner).setReferralCodesBulk(users, codes, overwrite);
+        await tx.wait();
+
         return code;
     }
 
@@ -202,6 +222,7 @@ async function deployFixture() {
         other,                                  // 기타 테스트 계정
         
         // === 컨트랙트 인스턴스들 ===
+        forwarder,
         stableCoin,                             // StableCoin 컨트랙트
         sbt,                                    // BadgeSBT 컨트랙트
         vesting,                                // TokenVesting 컨트랙트

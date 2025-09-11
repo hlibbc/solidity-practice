@@ -157,7 +157,6 @@ async function main() {
 
         // selector 계산
         const buyBoxSel = Shared.selectorForBuyBox(vesting.interface);
-        const testFuncSel = Shared.selectorForTestFunc(vesting.interface);
 
         // 허용 등록
         await Shared.withGasLog(
@@ -167,16 +166,6 @@ async function main() {
             'setup'
         );
         console.log('    • setAllowed 완료 (selector:', buyBoxSel, ')');
-        await waitIfNeeded();
-
-        // 허용 등록 (testFunc)
-        await Shared.withGasLog(
-            `[setup] forwarder.setAllowed(Vesting, testFunc=${testFuncSel}, true)`,
-            forwarder.setAllowed(vestingAddr, testFuncSel, true),
-            totals,
-            'setup'
-        );
-        console.log('    • setAllowed 완료 (testFunc selector:', testFuncSel, ')');
         await waitIfNeeded();
 
         // 4) 스케줄 초기화

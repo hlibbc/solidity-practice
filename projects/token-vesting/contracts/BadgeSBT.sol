@@ -116,7 +116,6 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
     /**
      * @notice SBT 발행(민트) - admin 전용, 이후 전송 불가
      * @param to 토큰 수취자 주소
-     * @param tokenURI_ 초기 메타데이터 URI
      * @param auth 소각 권한 설정 (EIP-5484)
      * @return tokenId 발행된 토큰의 ID
      * @dev 
@@ -125,19 +124,19 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
      * - 초기 등급은 Tier.None으로 설정
      * - EIP-5192와 EIP-5484 이벤트 발생
      */
-    function mint(address to, string calldata tokenURI_, BurnAuth auth)
+    function mint(address to, BurnAuth auth)
         external
         onlyAdmin
         returns (uint256 tokenId)
     {
         tokenId = _nextId++;
         _safeMint(to, tokenId);
-        _setTokenURI(tokenId, tokenURI_);
+        _setTokenURI(tokenId, URI_SPROUT);
 
         _locked[tokenId]    = true;
         _burnAuth[tokenId]  = auth;
         _issuer[tokenId]    = _msgSender();
-        _tierOf[tokenId]    = Tier.None; // 초기 등급(없음)
+        _tierOf[tokenId]    = Tier.Sprout; // 초기 등급(없음)
 
         emit Locked(tokenId); // EIP-5192
         emit Issued(_issuer[tokenId], to, tokenId, auth); // EIP-5484
@@ -249,7 +248,9 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
      */
     function upgradeBadge(uint256 tokenId, Tier newTier) external onlyAdmin {
         _requireOwned(tokenId);
-        if (newTier == Tier.None || uint8(newTier) > uint8(Tier.Moon)) revert InvalidTier();
+        if (newTier == Tier.None || uint8(newTier) > uint8(Tier.Moon)) {
+            revert InvalidTier();
+        }
         _upgradeBadge(tokenId, newTier);
     }
 
@@ -266,8 +267,9 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
     function _upgradeBadge(uint256 tokenId, Tier newTier) internal {
         Tier old = _tierOf[tokenId];
         // 다운그레이드 방지
-        if (uint8(newTier) < uint8(old)) revert InvalidTier();
-
+        if (uint8(newTier) < uint8(old)) {
+            revert InvalidTier();
+        }
         string memory newUri = _uriForTier(newTier);
         _tierOf[tokenId] = newTier;
         _setTokenURI(tokenId, newUri); // ERC4906의 MetadataUpdate 이벤트가 내부에서 발생(OZ v5)
@@ -288,23 +290,24 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
      * - Moon: 100 ~
      */
     function _tierFromCount(uint256 n) internal pure returns (Tier) {
-        if (n >= TIER_SPROUT_MAX) {
-            return Tier.Cloud;
-        }
-        if (n >= TIER_CLOUD_MAX) {
-            return Tier.Airplane;
-        }
-        if (n >= TIER_AIRPLANE_MAX) {
-            return Tier.Rocket;
-        }
-        if (n >= TIER_ROCKET_MAX) {
-            return Tier.SpaceStation;
-        }
-        if (n >= TIER_SSTATION_MAX) {
+        if (n >= TIER_SSTATION_MAX) { // 100+
             return Tier.Moon;
         }
-        return Tier.Sprout;
+        if (n >= TIER_ROCKET_MAX) { // 50..99
+            return Tier.SpaceStation;
+        }
+        if (n >= TIER_AIRPLANE_MAX) { // 20..49
+            return Tier.Rocket;
+        }
+        if (n >= TIER_CLOUD_MAX) { // 10..19
+            return Tier.Airplane;
+        }
+        if (n >= TIER_SPROUT_MAX) { // 5..9
+            return Tier.Cloud;
+        }
+        return Tier.Sprout; // 0..4 (문서상 1..4이지만 0은 실사용상 없거나 첫 민팅 직후)
     }
+
 
     /**
      * @notice 등급별 메타데이터 URI 반환

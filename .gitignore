@@ -1,6 +1,7 @@
 # Ignore node_module & .env for mono-repo root
 node_modules/
 .env
+pnpm-lock.yaml
 
 # Ignore all node_modules across projects
 **/node_modules/

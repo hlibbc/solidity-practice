@@ -295,21 +295,11 @@ async function main() {
         const userRows = parseUsersCsv(mustRead(userCsvPath));
         const users = userRows.map(r => ethers.getAddress(r.wallet));
         const codes = userRows.map(r => normCodeMaybeEmpty(r.code));
-        if (typeof vesting.setReferralCodesBulk === "function" && vesting.setReferralCodesBulk) {
-            await Shared.withGasLog(
-                `[referral] setReferralCodesBulk x${users.length}`,
-                vesting.connect(owner).setReferralCodesBulk(users, codes, true),
-                totals, "referral"
-            );
-        } else {
-            for (let i = 0; i < users.length; i++) {
-                await Shared.withGasLog(
-                    `[referral] setReferralCode ${i + 1}/${users.length}`,
-                    vesting.connect(owner).setReferralCode(users[i], codes[i], true),
-                    totals, "referral"
-                );
-            }
-        }
+        await Shared.withGasLog(
+            `[referral] setReferralCodesBulk x${users.length}`,
+            vesting.connect(owner).setReferralCodesBulk(users, codes, true),
+            totals, "referral"
+        );
     } else {
         console.log("[referral] skipped: user.csv not found");
     }

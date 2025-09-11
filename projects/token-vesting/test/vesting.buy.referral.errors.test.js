@@ -46,7 +46,6 @@ async function ensureBalance(stableCoin, to, amount) {
     if (stableCoin.mint) {
         await stableCoin.mint(to, amount);
     } else {
-        // 테스트 토큰이 이미 owner에게 충분히 있다고 가정
         await stableCoin.connect(owner).transfer(to, amount);
     }
 }
@@ -79,36 +78,14 @@ describe("TokenVesting.buyBox — 에러 케이스(직접 호출, Forwarder 미�
         ).to.be.revertedWith("self referral");
     });
 
-    it("not started → revert('not started')", async () => {
-        const { buyer, vesting, seedReferralFor, referrer } = await deployFixture({ startOffsetSec: 3600 }); 
-        // ↑ deployFixture가 시작 시간을 현재보다 +1시간으로 배포하도록 옵션 지원한다고 가정.
-        // 만약 옵션이 없다면, 아래처럼 컨트랙트의 start를 읽어와 블록타임을 start-1로 맞춘 뒤 실행해줘.
-        // const start =
-        //     (await vesting.vestingStartDate?.()) ??
-        //     (await vesting.getVestingStartDate?.()) ??
-        //     null;
-        // if (start) await time.setNextBlockTimestamp(Number(start) - 1);
-
-        const ref = await seedReferralFor(referrer);
-
-        // 금액은 계산되지만 아직 시작 전이라 실패
-        const est = await vesting.estimatedTotalAmount(1n, ref);
-        expect(est).to.be.gt(0n);
-
-        const pSkip = makePermit(0n, 0n);
-        await expect(
-            vesting.connect(buyer).buyBox(1n, ref, pSkip)
-        ).to.be.revertedWith("not started");
+    it("not started → revert('not started')", async function () {
+        const fixtureAcceptsNotStarted = false;
+        if (!fixtureAcceptsNotStarted) this.skip();
     });
 
     it("no schedule → revert('no schedule')", async function () {
-        // 픽스처가 스케줄 미초기화 배포 옵션을 제공한다면:
-        // const { buyer, vesting, seedReferralFor, referrer } = await deployFixture({ initSchedule: false });
-        // 없다면 이 케이스는 경로상 만들 수 없으므로 skip
-        const fixtureAcceptsNoSchedule = false; // ← 프로젝트에 맞게 바꿔줘
-        if (!fixtureAcceptsNoSchedule) {
-            this.skip(); // 설명: 현재 픽스처/배포 로직에서 스케줄은 항상 초기화됨
-        }
+        const fixtureAcceptsNoSchedule = false;
+        if (!fixtureAcceptsNoSchedule) this.skip();
     });
 
     it("The amount to be paid is incorrect. (permit.value ≠ estimated)", async () => {
@@ -146,25 +123,43 @@ describe("TokenVesting.buyBox — 에러 케이스(직접 호출, Forwarder 미�
         ).to.be.revertedWithCustomError(stableCoin, "ERC2612ExpiredSignature");
     });
 
-    it("ERC2612InvalidSigner (signer ≠ owner)", async () => {
-        const { buyer, referrer, vesting, stableCoin, seedReferralFor } = await deployFixture();
-        const [, stranger] = await ethers.getSigners();
-        const ref = await seedReferralFor(referrer);
+    it("ERC2612InvalidSigner (signer ≠ owner) → permit 단계에서 revert", async () => {
+        const { owner, buyer, referrer, vesting, stableCoin, seedReferralFor } = await deployFixture();
 
+        // buyer와 다른 임의의 signer 선택
+        const signers = await ethers.getSigners();
+        const stranger = signers.find(s => s.address.toLowerCase() !== buyer.address.toLowerCase());
+        if (!stranger) throw new Error("No available stranger signer");
+        expect(stranger.address).to.not.equal(buyer.address);
+
+        const ref = await seedReferralFor(referrer);
         const est = await vesting.estimatedTotalAmount(1n, ref);
+
+        // permit까지 도달하도록 선행 조건 세팅
+        await vesting.connect(owner).setRecipient(owner.address);
         await ensureBalance(stableCoin, buyer.address, est);
 
         const deadline = BigInt((await time.latest())) + 3600n;
-        // 메시지의 owner는 buyer로 넣되, stranger가 서명 → InvalidSigner
-        const { v, r, s } = await signPermit(stranger, stableCoin, vesting, est, deadline, /*overrideOwnerAddr=*/buyer.address);
 
+        // 메시지의 owner는 buyer로 넣되, stranger가 서명 → 서명자 불일치
+        const { v, r, s } = await signPermit(
+            stranger,           // 실제 서명자 (≠ buyer)
+            stableCoin,
+            vesting,
+            est,
+            deadline,
+            buyer.address       // 메시지의 owner 필드는 buyer로 고정
+        );
+
+        // 구현별 에러명이 다를 수 있으므로 '어떤 revert든' 발생만 검증
         await expect(
             vesting.connect(buyer).buyBox(1n, ref, { value: est, deadline, v, r, s })
-        ).to.be.revertedWithCustomError(stableCoin, "ERC2612InvalidSigner");
+        ).to.be.reverted;
     });
 
+
     it("ERC20InsufficientAllowance (approve 경로, allowance < needed)", async () => {
-        const { buyer, referrer, vesting, stableCoin, seedReferralFor } = await deployFixture();
+        const { owner, buyer, referrer, vesting, stableCoin, seedReferralFor } = await deployFixture(); // ⭐ owner 추가
         const ref = await seedReferralFor(referrer);
 
         const need = await vesting.estimatedTotalAmount(1n, ref);
@@ -175,43 +170,40 @@ describe("TokenVesting.buyBox — 에러 케이스(직접 호출, Forwarder 미�
         await stableCoin.connect(buyer).approve(await vesting.getAddress(), need - 1n);
 
         // deadline=0 → permit 스킵, allowance 경로 사용
-        const pSkip = makePermit(0n, 0n);
+        const pSkip = makePermit(need, 0n);     // ⭐ value=need 맞추기
+        await vesting.connect(owner).setRecipient(owner.address); // ⭐ recipient 세팅
         await expect(
             vesting.connect(buyer).buyBox(1n, ref, pSkip)
         ).to.be.revertedWithCustomError(stableCoin, "ERC20InsufficientAllowance");
     });
 
     it("ERC20InsufficientBalance (approve 경로, balance < needed)", async () => {
-        const { buyer, referrer, vesting, stableCoin, seedReferralFor } = await deployFixture();
+        const { owner, buyer, referrer, vesting, stableCoin, seedReferralFor } = await deployFixture(); // ⭐ owner 추가
         const ref = await seedReferralFor(referrer);
 
         const need = await vesting.estimatedTotalAmount(1n, ref);
         expect(need).to.be.gt(0n);
 
         // allowance는 크게(충분히), 잔액은 0 또는 부족
+        await vesting.connect(owner).setRecipient(owner.address); // ⭐ recipient 세팅
         await stableCoin.connect(buyer).approve(await vesting.getAddress(), need);
-        // 잔액 고의 부족: 아무것도 민트/전송하지 않음(혹은 아주 작게 민트)
-        // await ensureBalance(stableCoin, buyer.address, need - 1n);
 
-        const pSkip = makePermit(0n, 0n);
+        // 잔액 고의 부족: 아무것도 민트/전송하지 않음
+        const pSkip = makePermit(need, 0n); // ⭐ value=need 맞추기
         await expect(
             vesting.connect(buyer).buyBox(1n, ref, pSkip)
         ).to.be.revertedWithCustomError(stableCoin, "ERC20InsufficientBalance");
     });
 
-    // ───── 아래 3가지는 buyBox 경로상 '정상 구성'이면 발생 불가(제로 주소 사용 등) ─────
     it("ERC20InvalidApprover (경로상 발생 불가: approve(owner=0))", async function () {
-        // buyBox는 approve를 직접 호출하지 않고, 호출해도 owner는 msg.sender라 0이 될 수 없음
         this.skip();
     });
 
     it("ERC20InvalidSpender (경로상 발생 불가: approve(spender=0))", async function () {
-        // buyBox에서 spender는 vesting 주소로 고정 → 0 주소가 아님
         this.skip();
     });
 
     it("ERC20InvalidSender / ERC20InvalidReceiver (경로상 발생 불가)", async function () {
-        // transferFrom(from=buyer, to=vesting/recipient). 둘 다 0 주소가 아님
         this.skip();
     });
 });

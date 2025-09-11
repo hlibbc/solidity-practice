@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interface/IBadgeSBT.sol";
@@ -26,6 +27,7 @@ import "./interface/IBadgeSBT.sol";
 contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
 
     using Math for uint256;
+    using Address for address;
 
     /// def. struct
     /**
@@ -447,25 +449,6 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         require(_newAddr != address(0), "invalid address");
         recipient = _newAddr;
         emit RecipientSet(_newAddr);
-    }
-
-    /**
-     * @notice 관리자가 유저의 레퍼럴 코드를 직접 설정하는 함수 (기존 시스템 코드 이관용)
-     * @param user 레퍼럴 코드를 설정할 유저 주소
-     * @param codeStr 설정할 레퍼럴 코드 문자열 (8자리)
-     * @param overwrite 기존 코드가 있을 때 덮어쓸지 여부
-     * @dev 
-     * - onlyOwner만 호출 가능
-     * - 문자열 코드를 bytes8로 정규화하여 내부 함수 호출
-     * - 기존 시스템에서 사용하던 레퍼럴 코드를 새로운 시스템으로 이관할 때 사용
-     */
-    function setReferralCode(
-        address user, 
-        string calldata codeStr, 
-        bool overwrite
-    ) external onlyOwner {
-        bytes8 code = _normalizeToBytes8(codeStr);
-        _setReferralCodeInternal(user, code, overwrite);
     }
 
     /**
@@ -1918,15 +1901,20 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * - SBT_BURNAUTH.Neither로 설정하여 소각 불가능하게 설정
      */
     function _ensureSbt(address user) internal returns (uint256 tokenId) {
-        if (address(badgeSBT) == address(0)) return 0; // 미세팅이면 무시
-        tokenId = sbtIdOf[user];
-        if (tokenId == 0) {
-            // 초기 URI는 빈 문자열로 민트 → 즉시 upgradeBadgeByCount가 올바른 등급 URI로 갱신
-            tokenId = badgeSBT.mint(user, "", SBT_BURNAUTH);
-            sbtIdOf[user] = tokenId;
-            emit BadgeSBTMinted(user, tokenId);
+        address sbtAddr = address(badgeSBT);
+        // SBT 미설정 or 잘못된 주소(EOA 등)면 스킵
+        if (sbtAddr == address(0) || sbtAddr.code.length == 0) {
+            return 0;
         }
+        tokenId = sbtIdOf[user];
+        if (tokenId != 0) return tokenId;
+
+        uint256 newId = badgeSBT.mint(user, SBT_BURNAUTH);
+        sbtIdOf[user] = newId;
+        emit BadgeSBTMinted(user, newId);
+        tokenId = newId;
     }
+
 
     /**
      * @notice 사용자의 SBT 토큰 등급을 필요시 업그레이드하는 내부 함수 - 등급 상승
@@ -1940,15 +1928,16 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * - 구매량 증가에 따른 자동 등급 상승 시스템
      */
     function _upgradeBadgeIfNeeded(address user, uint256 tokenId) internal {
-        if (address(badgeSBT) == address(0) || tokenId == 0) {
+        address sbtAddr = address(badgeSBT);
+        if (sbtAddr == address(0) || tokenId == 0 || sbtAddr.code.length == 0) {
             return;
         }
         uint256 total = totalBoughtBoxes[user];
         badgeSBT.upgradeBadgeByCount(tokenId, total);
-        // 이벤트(선택): 현재 등급 조회해서 로깅
         IBadgeSBT.Tier t = badgeSBT.currentTier(tokenId);
         emit BadgeSBTUpgraded(user, tokenId, t, total);
     }
+
 
     // ==== "어제" 하루치(풀별, 6dec 절삭) ====
 
@@ -2007,10 +1996,5 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      */
     function _contextSuffixLength() internal pure override(Context, ERC2771Context) returns (uint256) {
         return 20;
-    }
-
-    uint public temp;
-    function testFunc() public {
-        temp++;
     }
 }

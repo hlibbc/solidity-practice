@@ -82,59 +82,34 @@ describe("vesting.sync.accounting", function () {
      *  - 분모 설정이 올바르게 이루어지는지
      */
     it("effDay/분모 반영: d=0 보상>0, d=1부터 분모=cumBoxes[0]", async () => {
-        // === 테스트 환경 구성 ===
-        const { buyer, referrer, vesting, DAY, seedReferralFor, increaseTime } = await deployFixture();
+        const { owner, buyer, referrer, stableCoin, vesting, DAY, seedReferralFor, increaseTime } = await deployFixture();
 
-        // === referrer 코드 세팅 ===
-        // seedReferralFor 함수를 통해 referrer에게 레퍼럴 코드 할당
+        // ★ vesting가 판매 대금을 보낼 곳 필수
+        await vesting.connect(owner).setRecipient(owner.address);
+
+        // ★ buyer에게 USDT 주고 approve
+        await stableCoin.connect(owner).transfer(buyer.address, ethers.parseUnits("1000000", 6));
+        await stableCoin.connect(buyer).approve(await vesting.getAddress(), ethers.MaxUint256);
+
         const refCode = await seedReferralFor(referrer);
 
-        // === d=0에서 구매: 3개 박스 ===
         const boxCount = 3n;
-        // 구매할 박스 수량에 대한 총 가격 견적 조회
         const estimated = await vesting.estimatedTotalAmount(boxCount, refCode);
         expect(estimated).to.be.gt(0n);
 
-        // === permit 데이터 생성 (permit 미사용으로 deadline=0 설정) ===
-        // permit 경로를 스킵하고 approve 기반으로 처리하기 위한 설정
-        const pSkip = { 
-            value: estimated,           // 견적된 총 가격
-            deadline: 0n,              // permit 미사용 (0으로 설정)
-            v: 0,                      // 서명 데이터 (사용하지 않음)
-            r: ethers.ZeroHash,        // 서명 데이터 (사용하지 않음)
-            s: ethers.ZeroHash         // 서명 데이터 (사용하지 않음)
-        };
-        
-        // === 박스 구매 실행 및 이벤트 발생 확인 ===
-        // BoxesPurchased 이벤트가 발생하는지 확인하여 구매 성공 검증
-        await expect(vesting.connect(buyer).buyBox(boxCount, refCode, pSkip))
-            .to.emit(vesting, "BoxesPurchased");
+        const pSkip = { value: estimated, deadline: 0n, v: 0, r: ethers.ZeroHash, s: ethers.ZeroHash };
+        await expect(vesting.connect(buyer).buyBox(boxCount, refCode, pSkip)).to.emit(vesting, "BoxesPurchased");
 
-        // === 1일 경과 → d=0 확정 ===
-        // DAY + 1n초만큼 시간을 증가시켜 하루가 지나도록 함
         await increaseTime(DAY + 1n);
-        // 베스팅 시스템 동기화 실행 (d=0 확정)
         await vesting.sync();
 
-        // === (정책 변경 반영) d=0 보상 단가 검증 ===
-        // d=0: 분모 = (전일 누적 0) + (당일 추가분 boxesAddedPerDay[0]=3) → perBox[0] > 0
-        // d=0에서의 보상 단가가 0보다 큰지 확인
         const per0 = await vesting.rewardPerBox(0n);
         expect(per0 > 0n).to.equal(true);
-
-        // === 누적 박스 수 검증 ===
-        // d=0의 누적 박스 수가 당일 판매 누적치(3개)와 동일한지 확인
         expect(await vesting.cumBoxes(0n)).to.equal(3n);
 
-        // === 추가로 1일 더 경과 → d=1 확정 ===
-        // 다시 하루만큼 시간을 증가시켜 d=1로 진행
         await increaseTime(DAY + 1n);
-        // 베스팅 시스템 동기화 실행 (d=1 확정)
         await vesting.sync();
 
-        // === d=1 보상 단가 검증 ===
-        // d=1: 분모=cumBoxes[0]=3 → perBox[1] > 0
-        // d=1에서의 보상 단가가 0보다 큰지 확인
         const per1 = await vesting.rewardPerBox(1n);
         expect(per1 > 0n).to.equal(true);
     });

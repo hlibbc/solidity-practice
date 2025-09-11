@@ -86,26 +86,33 @@ describe("vesting.buy.referral", function () {
      */
     it("buyBox: approve 경로(deadline=0) + 이벤트", async () => {
         // === 테스트 환경 설정 ===
-        const { buyer, referrer, vesting, stableCoin, seedReferralFor } = await deployFixture();
+        const { owner, buyer, referrer, vesting, stableCoin, seedReferralFor } = await deployFixture();
         const refCode = await seedReferralFor(referrer); // "SPLALABS"
 
-        // === buyer에게 토큰 approve 설정 ===
-        // approve는 필수 아님(transferFrom cost=0)이지만, 프로젝트 상황에 따라 남겨둠
-        // cost=0이지만 안전하게 approve 설정
-        await stableCoin.connect(buyer).approve(await vesting.getAddress(), ethers.MaxUint256);
+        // ★ recipient 사전 설정 (미설정 시 'recipient not set'로 먼저 revert)
+        await vesting.connect(owner).setRecipient(owner.address);
 
-        // === 레퍼럴 코드를 통한 박스 구매 ===
         const boxCount = 2n;
         const estimated = await vesting.estimatedTotalAmount(boxCount, refCode);
-        
-        // 정책상 레퍼럴 코드가 유효해야 estimated>0
         expect(estimated).to.be.gt(0n);
 
-        // deadline=0 → permit 경로 스킵하고 approve 기반으로 구매
-        const pSkip = makePermit(estimated, 0n);
-        await expect(vesting.connect(buyer).buyBox(boxCount, refCode, pSkip))
-            .to.emit(vesting, "BoxesPurchased");
+        // ★ buyer 잔액 확보 (없으면 transferFrom 단계에서 ERC20InsufficientBalance)
+        if (stableCoin.mint) {
+            await stableCoin.mint(buyer.address, estimated);
+        } else {
+            await stableCoin.connect(owner).transfer(buyer.address, estimated);
+        }
+
+        // approve는 안전하게 Max로
+        await stableCoin.connect(buyer).approve(await vesting.getAddress(), ethers.MaxUint256);
+
+        // deadline=0 → permit 경로 스킵, approve 기반 구매
+        const pSkip = { value: estimated, deadline: 0n, v: 0, r: ethers.ZeroHash, s: ethers.ZeroHash };
+        await expect(
+            vesting.connect(buyer).buyBox(boxCount, refCode, pSkip)
+        ).to.emit(vesting, "BoxesPurchased");
     });
+
 
     // =============================================================================
     // permit 경로를 통한 박스 구매 테스트
@@ -131,26 +138,31 @@ describe("vesting.buy.referral", function () {
      */
     it("buyBox: permit 경로 성공", async () => {
         // === 테스트 환경 설정 ===
-        const { buyer, referrer, vesting, stableCoin, seedReferralFor } = await deployFixture();
+        const { owner, buyer, referrer, vesting, stableCoin, seedReferralFor } = await deployFixture();
         const refCode = await seedReferralFor(referrer);
 
         const boxCount = 1n;
         const estimated = await vesting.estimatedTotalAmount(boxCount, refCode);
         expect(estimated).to.be.gt(0n);
 
-        // === EIP-712 도메인 설정 ===
-        // 현재 블록 타임스탬프 + 1시간을 deadline으로 설정
-        const deadline = BigInt((await ethers.provider.getBlock("latest")).timestamp) + 3600n;
+        // ★ recipient 사전 설정
+        await vesting.connect(owner).setRecipient(owner.address);
 
-        // EIP-712 도메인 정보
+        // ★ buyer 잔액 확보 (permit 후 transferFrom 단계에서 필요)
+        if (stableCoin.mint) {
+            await stableCoin.mint(buyer.address, estimated);
+        } else {
+            await stableCoin.connect(owner).transfer(buyer.address, estimated);
+        }
+
+        // === EIP-712 도메인 / 타입 / 메시지 ===
+        const deadline = BigInt((await ethers.provider.getBlock("latest")).timestamp) + 3600n;
         const domain = {
             name: await stableCoin.name(),
             version: "1",
             chainId: Number((await ethers.provider.getNetwork()).chainId),
             verifyingContract: await stableCoin.getAddress(),
         };
-
-        // EIP-712 타입 정의
         const types = {
             Permit: [
                 { name: "owner",   type: "address" },
@@ -160,27 +172,23 @@ describe("vesting.buy.referral", function () {
                 { name: "deadline",type: "uint256" },
             ],
         };
-
-        // === 현재 nonce 조회 및 메시지 구성 ===
-        // value는 반드시 estimated와 동일해야 함 (buyBox에서 비교하는 값)
         const nonce = await stableCoin.nonces(buyer.address);
         const message = {
             owner: buyer.address,
             spender: await vesting.getAddress(),
-            value: estimated,                     // ★ buyBox에서 비교하는 값과 동일해야 함
+            value: estimated,              // ★ buyBox 내부 비교값과 동일
             nonce,
             deadline: Number(deadline),
         };
 
-        // === EIP-712 서명 생성 ===
         const sig = await buyer.signTypedData(domain, types, message);
         const { v, r, s } = ethers.Signature.from(sig);
 
-        // === permit 경로로 구매 성공 ===
         await expect(
             vesting.connect(buyer).buyBox(boxCount, refCode, { value: estimated, deadline, v, r, s })
         ).to.emit(vesting, "BoxesPurchased");
     });
+
 
     // =============================================================================
     // 자기추천 방지 기능 테스트

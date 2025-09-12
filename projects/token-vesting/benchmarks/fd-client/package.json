@@ -1,0 +1,14 @@
+{
+  "name": "fd-client",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node fd-client.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.0",
+    "ethers": "^6.15.0"
+  }
+}
+
+

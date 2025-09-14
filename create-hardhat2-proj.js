@@ -8,7 +8,9 @@ const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
 
+// const projectName = process.argv[2];
 const projectName = process.argv[2];
+const pkgName = projectName.split("/").pop(); // 프로젝트 내 서브프로젝트 식별 (ex. zk-playground/zk-01_basic-arithmetic)
 
 if (!projectName) {
   console.error("❌ 프로젝트 이름을 인자로 넘겨주세요. 예: node create-monorepo-solidity-proj.js proj04");
@@ -35,7 +37,7 @@ fs.mkdirSync(path.join(projectPath, "lib")); // forge install용
 // hardhat-toolbox 버전: HH2에선 3.0.0이 안정적, HH3로 올릴경우 최신버전으로..
 console.log("📦 package.json 생성 중...");
 const packageJson = {
-  name: projectName,
+  name: pkgName,
   version: "1.0.0",
   scripts: {
     compile: "hardhat compile",
@@ -45,7 +47,7 @@ const packageJson = {
   devDependencies: {
     hardhat: "^2.25.0",
     "@nomicfoundation/hardhat-toolbox": "^3.0.0",
-    "@openzeppelin/contracts": "^5.3.0",
+    "@openzeppelin/contracts": "^5.4.0",
     dotenv: "^17.2.0"
   }
 };
@@ -61,7 +63,7 @@ const exampleContract = `
 pragma solidity ^0.8.20;
 
 contract Example {
-    string public greet = "Hello from ${projectName}!";
+    string public greet = "Hello from ${pkgName}!";
 }
 `;
 fs.writeFileSync(path.join(projectPath, "contracts", "Example.sol"), exampleContract);
@@ -87,7 +89,7 @@ module.exports = {
   solidity: {
     version: "0.8.28",
     settings: {
-      evmVersion: "cancun", // 👈 중요: cancun 버전 활성화
+      // evmVersion: "cancun", // 👈 중요: cancun 버전 활성화
       optimizer: {
         enabled: true,
         runs: 200
@@ -126,7 +128,13 @@ fs.writeFileSync(path.join(projectPath, "remappings.txt"), [
 
 // Foundry forge-std 설치
 console.log("📦 의존성 설치 중...");
-execSync("pnpm install", { cwd: projectPath, stdio: "inherit" });
+// execSync("pnpm install", { cwd: projectPath, stdio: "inherit" });
+// 루트에서 현재 패키지만 설치
+const repoRoot = path.resolve(__dirname);
+execSync(
+  `pnpm -w install --filter ${pkgName}`,
+  { cwd: repoRoot, stdio: "inherit" }
+);
 
 console.log("📦 Foundry 유틸 설치 중 (forge-std)...");
 execSync("forge install foundry-rs/forge-std", { // foundry 최신버전 (v.1.2.3) 부터는 no-commit 할 필요 없음

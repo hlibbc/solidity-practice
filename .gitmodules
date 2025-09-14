@@ -131,3 +131,9 @@
 [submodule "projects/hardhat3-test/lib/openzeppelin-contracts"]
 	path = projects/hardhat3-test/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/zk-playground/zk-02_commitments-merkle/lib/forge-std"]
+	path = projects/zk-playground/zk-02_commitments-merkle/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/zk-playground/zk-02_commitments-merkle/lib/openzeppelin-contracts"]
+	path = projects/zk-playground/zk-02_commitments-merkle/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

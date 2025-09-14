@@ -116,7 +116,7 @@ const config: HardhatUserConfig = {
   solidity: {
     version: "0.8.28",
     settings: {
-      evmVersion: "cancun",
+      // evmVersion: "cancun",
       optimizer: { enabled: true, runs: 200 }
     }
   },
@@ -166,7 +166,13 @@ fs.writeFileSync(
 
 // ──────────────────────────────────────────────────────────────────────────────
 console.log("📦 의존성 설치 중 (pnpm install)...");
-execSync("pnpm install", { cwd: projectPath, stdio: "inherit" });
+// execSync("pnpm install", { cwd: projectPath, stdio: "inherit" });
+// 루트에서 현재 패키지만 설치
+const repoRoot = path.resolve(__dirname);
+execSync(
+  `pnpm -w install --filter ${pkgName}`,
+  { cwd: repoRoot, stdio: "inherit" }
+);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Foundry 라이브러리 설치 (버전 고정 권장)

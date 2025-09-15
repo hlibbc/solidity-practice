@@ -630,7 +630,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     function sendBox(
         address to, 
         uint256 boxCount
-    ) external nonReentrant {
+    ) external nonReentrant onlyOwner {
         require(scheduleInitialized, "no schedule");
         require(block.timestamp >= vestingStartDate, "not started");
 

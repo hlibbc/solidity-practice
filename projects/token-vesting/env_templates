@@ -1,5 +1,32 @@
-VEST_EPOCH=
-VEST_ADDR=
-PROVIDER_URL=
-OWNER_KEY=
-RECIPIENT_ADDR=
+### 공통 환경변수
+BUY_POOL1_AMOUNT=/* BUY_POOL1 AMOUNT */
+BUY_POOL2_AMOUNT=/* BUY_POOL2 AMOUNT */
+BUY_POOL3_AMOUNT=/* BUY_POOL3 AMOUNT */
+BUY_POOL4_AMOUNT=/* BUY_POOL4 AMOUNT */
+REF_POOL1_AMOUNT=/* REF_POOL1 AMOUNT */
+REF_POOL2_AMOUNT=/* REF_POOL2 AMOUNT */
+REF_POOL3_AMOUNT=/* REF_POOL3 AMOUNT */
+REF_POOL4_AMOUNT=/* REF_POOL4 AMOUNT */
+VEST_START=/* VESTING 시작 시각 */
+VEST_END1=/* VESTING 1년차 종료 시각 */
+VEST_END2=/* VESTING 2년차 종료 시각 */
+VEST_END3=/* VESTING 3년차 종료 시각 */
+VEST_END4=/* VESTING 4년차 종료 시각 */
+VEST_EPOCH=/* 현재시각 시뮬레이트 (VEST_EPOCH까지만 시뮬레이트) */
+VEST_ADDR=/* VESTING 금액 확인하기 위한 주소 */
+
+### 체인별 환경변수
+PROVIDER_URL=/* provider 정보 */
+RECIPIENT_ADDR=/* deploy 관련 환경변수 */
+OWNER_KEY=/* 
+    script 실행용 owner key 
+    (deployContract, backfillHistories, syncVesting, delegateBuyBox)
+*/
+PRIVATE_KEY=/* 
+    script 실행용 user key 
+    (buyBox, delegateBuyBox)
+*/
+USER_ADDRESS=/* 
+    script 실행 중 preview 관련 처리 address 
+    (previewBuyerClaimable, previewBuyerEarnedYsterday, previewReferrerClaimable, previewReferrerEarnedYsterday)
+*/

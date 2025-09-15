@@ -22,6 +22,26 @@ function toJsonableBigInts(arr) {
 }
 function isUtcMidnight(tsBig) { return (tsBig % DAY) === 0n; }
 
+/**
+ * 환경변수로부터 토큰 수량을 읽어 BigInt로 반환
+ * - 값이 없거나 "0"이면 0n
+ * - "170_000_000", "170,000,000" 같이 구분자 포함해도 허용
+ */
+function envAmount(name, decimals = 18) {
+    const raw = process.env[name];
+    console.log(raw)
+    if (!raw || raw.trim() === '' || raw.trim() === '0') {
+        return 0n;
+    }
+    const cleaned = raw.trim().replace(/[,_ ]/g, '');
+    try {
+        return ethers.parseUnits(cleaned, decimals);
+    } catch (e) {
+        console.warn(`⚠️  ${name}="${raw}" 파싱 실패 → 0 처리`);
+        return 0n;
+    }
+}
+
 async function main() {
     console.log('🚀 TokenVesting / BadgeSBT / StableCoin 배포 스크립트 시작');
 
@@ -40,25 +60,30 @@ async function main() {
 
     // ─────────────────────────────────────────────────────────────
     // 🔒 하드코딩된 베스팅 시작/종료값
-    const START_TS = 1748822400n; // 2025.06.02 00:00:00 UTC
-    const ENDS = [
-        1780271999n, // 2026.05.31 23:59:59 
-        1811807999n, // 2027.05.31 23:59:59
-        1843430399n, // 2028.05.31 23:59:59
-        1874966399n, // 2029.05.31 23:59:59
-    ]; // inclusive
+    const startTsStr = process.env.VEST_START;
+    const START_TS = BigInt(startTsStr);
+
+    const endTsStr1 = process.env.VEST_END1;
+    const END_TS1 = BigInt(endTsStr1);
+    const endTsStr2 = process.env.VEST_END2;
+    const END_TS2 = BigInt(endTsStr2);
+    const endTsStr3 = process.env.VEST_END3;
+    const END_TS3 = BigInt(endTsStr3);
+    const endTsStr4 = process.env.VEST_END4;
+    const END_TS4 = BigInt(endTsStr4);
+    const ENDS = [END_TS1, END_TS2, END_TS3, END_TS4]; // inclusive
 
     const BUYER_TOTALS = [
-        ethers.parseUnits('170000000', 18),
-        ethers.parseUnits('87500000', 18),
-        ethers.parseUnits('52500000', 18),
-        ethers.parseUnits('40000000', 18),
+        envAmount("BUY_POOL1_AMOUNT", 18),
+        envAmount("BUY_POOL2_AMOUNT", 18),
+        envAmount("BUY_POOL3_AMOUNT", 18),
+        envAmount("BUY_POOL4_AMOUNT", 18),
     ];
     const REF_TOTALS = [
-        ethers.parseUnits('15000000', 18),
-        ethers.parseUnits('15000000', 18),
-        0n,
-        0n,
+        envAmount("REF_POOL1_AMOUNT", 18),
+        envAmount("REF_POOL2_AMOUNT", 18),
+        envAmount("REF_POOL3_AMOUNT", 18),
+        envAmount("REF_POOL4_AMOUNT", 18),
     ];
     // ─────────────────────────────────────────────────────────────
 

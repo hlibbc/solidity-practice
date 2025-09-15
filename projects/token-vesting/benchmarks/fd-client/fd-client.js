@@ -21,7 +21,7 @@
  *  4) ForwardRequest(EIP-712) 서명 (from=buyer)
  *  5) BigInt → string 변환 후 서버로 POST → 응답 출력
  */
-require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
+require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
 
 const fs = require('fs');
 const path = require('path');

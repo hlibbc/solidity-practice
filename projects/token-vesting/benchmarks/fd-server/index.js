@@ -16,7 +16,7 @@
  *      • 응답    : { ok, txHash?, status?, block?, stage?, error? }
  */
 
-require('dotenv').config({ path: require('path').resolve(__dirname, '../../.env') });
+require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
 
 const fs = require('fs');
 const path = require('path');

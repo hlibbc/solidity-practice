@@ -223,6 +223,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * @param paidAmount 구매에 사용된 스테이블코인 금액(최소 단위)
      * @param buyback 추천인 적립 바이백 금액 (10%)
      * @param refCode 추천 코드(bytes8, 대문자 영문/숫자 8자, 정규화된 값)
+     * @param timestamp 발생 시각
      * @dev
      * - buyBox 성공 시 emit (adminBackfillPurchaseAt도 동일 이벤트 emit)
      * - 당일 구매분은 당일 분배에 참여, 익일 00:00 확정 (effDay = dToday)
@@ -236,7 +237,8 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         address indexed referrer,
         uint256 paidAmount,
         uint256 buyback,
-        bytes8 refCode
+        bytes8 refCode,
+        uint64 timestamp
     );
 
     /**
@@ -244,12 +246,14 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * @param from 보낸 주소
      * @param to 받은 주소
      * @param boxCount 이전한 박스 수
+     * @param timestamp 발생 시각
      * @dev 전송(send)/백필전송: “**다음 날(effDay=d+1)**부터 유효”
      */
     event BoxesTransferred(
         address indexed from,
         address indexed to,
-        uint256 boxCount
+        uint256 boxCount,
+        uint64 timestamp
     );
 
     /**
@@ -521,7 +525,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
             }
 
             // 3) 이벤트 emit (buyback=0 고정)
-            emit BoxesPurchased(p.buyer, p.boxCount, referrer, p.paidUnits, 0, refCode);
+            emit BoxesPurchased(p.buyer, p.boxCount, referrer, p.paidUnits, 0, refCode, uint64(p.purchaseTs));
 
             totalBoughtBoxes[p.buyer] += p.boxCount;
             uint256 sbtId = _ensureSbt(p.buyer);
@@ -559,7 +563,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
             // 확정된 날짜 이전으로는 백필 불가
             require(d >= lastSyncedDay, "day finalized");
 
-            uint256 effDay = d + 1;
+            uint256 effDay = d; // 요청반영: 소유권이전 시 당일부터 효력발생
 
             // ── from(보낸 사람) 절대값 누적 차감(in-place)
             BoxAmountCheckpoint[] storage sHist = buyerBoxAmountHistory[t.from];
@@ -591,7 +595,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
             // 수령자 레퍼럴 코드 보장(선택)
             _ensureReferralCode(t.to);
 
-            emit BoxesTransferred(t.from, t.to, t.boxCount);
+            emit BoxesTransferred(t.from, t.to, t.boxCount, uint64(t.transferTs));
 
             unchecked { ++i; }
         }
@@ -641,7 +645,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         require(boxCount > 0, "box=0");
 
         uint256 dToday = (block.timestamp - vestingStartDate) / SECONDS_PER_DAY;
-        uint256 effDay = dToday + 1;
+        uint256 effDay = dToday; //  요청반영: 소유권이전 시 당일부터 효력발생
 
         // ── from(보낸 사람) 절대값 누적 차감(in-place)
         BoxAmountCheckpoint[] storage sHist = buyerBoxAmountHistory[sender];
@@ -668,7 +672,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         // 수령자 레퍼럴 코드 보장(선택)
         _ensureReferralCode(to);
 
-        emit BoxesTransferred(sender, to, boxCount);
+        emit BoxesTransferred(sender, to, boxCount, (uint64)(block.timestamp));
     }
 
     /**
@@ -1189,7 +1193,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         _pushRefCheckpoint(referrer, dToday, boxCount);
         _ensureReferralCode(sender);
 
-        emit BoxesPurchased(sender, boxCount, referrer, estimatedPrice, buyback, normCode);
+        emit BoxesPurchased(sender, boxCount, referrer, estimatedPrice, buyback, normCode, (uint64)(block.timestamp));
 
         totalBoughtBoxes[sender] += boxCount; // ① 누적 구매량 갱신
         uint256 sbtId = _ensureSbt(sender); // ② 첫 구매면 SBT 민트

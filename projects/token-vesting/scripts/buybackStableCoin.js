@@ -25,7 +25,7 @@ const Shared = require("./_shared");
 
 async function main() {
     // ── 0) 지갑/프로바이더
-    const pk = process.env.PRIVATE_KEY;
+    const pk = process.env.REF_PRIVATE_KEY;
     if (!pk) throw new Error("❌ .env에 PRIVATE_KEY를 설정하세요.");
     const providerUrl = process.env.PROVIDER_URL || "http://localhost:8545";
     const provider = new ethers.JsonRpcProvider(providerUrl);

@@ -1,0 +1,7 @@
+{
+    "amount": 10,
+    "ref": "2WEV4560",
+    "gas_call": "3000000",
+    "gas_execute": "5000000",
+    "deadline": 3600
+}

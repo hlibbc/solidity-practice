@@ -29,7 +29,6 @@ function isUtcMidnight(tsBig) { return (tsBig % DAY) === 0n; }
  */
 function envAmount(name, decimals = 18) {
     const raw = process.env[name];
-    console.log(raw)
     if (!raw || raw.trim() === '' || raw.trim() === '0') {
         return 0n;
     }

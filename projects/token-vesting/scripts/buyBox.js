@@ -37,7 +37,7 @@ async function main() {
     if (!pk) throw new Error('❌ .env에 PRIVATE_KEY를 설정하세요.');
 
     const deploymentPath = path.resolve(__dirname, './output/deployment-info.json');
-    const buyBoxPath = path.resolve(__dirname, './data/buyBox.json');
+    const buyBoxPath = path.resolve(__dirname, './input/buyBox.json');
 
     const dep = loadJSON(deploymentPath);
     const cfg = loadJSON(buyBoxPath);

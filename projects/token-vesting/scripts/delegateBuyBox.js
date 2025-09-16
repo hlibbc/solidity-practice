@@ -147,7 +147,7 @@ async function main() {
 
     // ---- load files ----
     const dep = loadJSON('./output/deployment-info.json');
-    const dcfg = loadJSON('./data/delegateBuyBox.json'); // { amount, ref, deadline, gas_call, gas_execute }
+    const dcfg = loadJSON('./input/delegateBuyBox.json'); // { amount, ref, deadline, gas_call, gas_execute }
 
     const forwarderAddr = dep?.forwarder;
     const tokenVestingAddr = dep?.contracts?.tokenVesting;
@@ -274,39 +274,39 @@ async function main() {
     console.log('📦 현재까지 구매된 박스 총량:', totalBoxesBefore.toString());
     console.log('📦 현재까지 레퍼럴된 박스 총량:', totalRefsBefore.toString());
 
-    // if (buyerBal < required) {
-    //     const ownerBase = new ethers.Wallet(OWNER_KEY, hre.ethers.provider);
-    //     const ownerAddr = await ownerBase.getAddress();
-    //     const need = required - buyerBal;
-    //     const ownerBal = await usdt.balanceOf(ownerAddr);
+    if (buyerBal < required) {
+        const ownerBase = new ethers.Wallet(OWNER_KEY, hre.ethers.provider);
+        const ownerAddr = await ownerBase.getAddress();
+        const need = required - buyerBal;
+        const ownerBal = await usdt.balanceOf(ownerAddr);
 
-    //     console.log(`\n🤝 USDT 자동 충전: owner(${ownerAddr}) → buyer(${buyerAddr})`);
-    //     console.log(`    • 필요한 금액 : ${ethers.formatUnits(need, decimals)} ${symbol}`);
-    //     console.log(`    • owner 잔액 : ${ethers.formatUnits(ownerBal, decimals)} ${symbol}`);
+        console.log(`\n🤝 USDT 자동 충전: owner(${ownerAddr}) → buyer(${buyerAddr})`);
+        console.log(`    • 필요한 금액 : ${ethers.formatUnits(need, decimals)} ${symbol}`);
+        console.log(`    • owner 잔액 : ${ethers.formatUnits(ownerBal, decimals)} ${symbol}`);
 
-    //     if (ownerBal < need) {
-    //         throw new Error(
-    //             `❌ OWNER의 USDT 부족: 필요=${ethers.formatUnits(need, decimals)} ${symbol}, 보유=${ethers.formatUnits(ownerBal, decimals)} ${symbol}`
-    //         );
-    //     }
+        if (ownerBal < need) {
+            throw new Error(
+                `❌ OWNER의 USDT 부족: 필요=${ethers.formatUnits(need, decimals)} ${symbol}, 보유=${ethers.formatUnits(ownerBal, decimals)} ${symbol}`
+            );
+        }
 
-    //     const txFund = await usdt.connect(ownerBase).transfer(buyerAddr, need);
-    //     if (Shared?.withGasLog) {
-    //         await Shared.withGasLog('[fund] owner→buyer USDT', Promise.resolve(txFund), {}, 'setup');
-    //     }
-    //     const rcFund = await txFund.wait();
-    //     console.log('✅ 충전 완료. txHash:', rcFund.hash);
+        const txFund = await usdt.connect(ownerBase).transfer(buyerAddr, need);
+        if (Shared?.withGasLog) {
+            await Shared.withGasLog('[fund] owner→buyer USDT', Promise.resolve(txFund), {}, 'setup');
+        }
+        const rcFund = await txFund.wait();
+        console.log('✅ 충전 완료. txHash:', rcFund.hash);
 
-    //     // 충전 후 buyer 잔액 재조회
-    //     buyerBal = await usdt.balanceOf(buyerAddr);
-    //     console.log(`    • 충전 후 buyer 잔액: ${ethers.formatUnits(buyerBal, decimals)} ${symbol}`);
-    // }
+        // 충전 후 buyer 잔액 재조회
+        buyerBal = await usdt.balanceOf(buyerAddr);
+        console.log(`    • 충전 후 buyer 잔액: ${ethers.formatUnits(buyerBal, decimals)} ${symbol}`);
+    }
 
-    // if (buyerBal < required) {
-    //     throw new Error(
-    //         `❌ 잔액 부족: 필요=${ethers.formatUnits(required, decimals)} ${symbol}, 보유=${ethers.formatUnits(buyerBal, decimals)} ${symbol}`
-    //     );
-    // }
+    if (buyerBal < required) {
+        throw new Error(
+            `❌ 잔액 부족: 필요=${ethers.formatUnits(required, decimals)} ${symbol}, 보유=${ethers.formatUnits(buyerBal, decimals)} ${symbol}`
+        );
+    }
     // =======================================
 
     // ---- ForwardRequest EIP-712 서명 ----

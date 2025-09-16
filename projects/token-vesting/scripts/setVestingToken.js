@@ -124,7 +124,7 @@ async function main() {
 
     // 1) Token 배포
     console.log('🚀 Deploying Token...');
-    const Token = await ethers.getContractFactory('Token');
+    const Token = await ethers.getContractFactory('Token', owner);
     const token = await Token.deploy();
     await token.waitForDeployment();
     const tokenAddr = await token.getAddress();
@@ -138,7 +138,7 @@ async function main() {
     const vestingAddr = findVestingAddress(info);
     console.log(`📦 TokenVesting at: ${vestingAddr}`);
 
-    const vesting = await ethers.getContractAt('TokenVesting', vestingAddr);
+    const vesting = await ethers.getContractAt('TokenVesting', vestingAddr, owner);
 
     // 3) setVestingToken (이미 동일하면 스킵)
     const current = await vesting.vestingToken();

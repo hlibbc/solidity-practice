@@ -43,8 +43,11 @@ const PURCHASE_CSV = path.join(DATA_DIR, 'purchase_history.csv');
 // 대상 지갑들
 const WALLET_A = ethers.getAddress('0x70997970C51812dc3A010C7d01b50e0d17dc79C8');
 const WALLET_B = ethers.getAddress('0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC');
+const WALLET_C = ethers.getAddress('0x90F79bf6EB2c4f870365E785982E1f101E93b906');
+const WALLET_D = ethers.getAddress('0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65');
+const WALLET_E = ethers.getAddress('0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc');
 
-describe('scenario.01 — CSV 백필 후 시점별 베스팅 값 확인', function () {
+describe('scenario.02 — CSV 백필 후 시점별 베스팅 값 확인', function () {
     let owner, forwarder, stableCoin, vesting;
 
     /**
@@ -148,7 +151,7 @@ describe('scenario.01 — CSV 백필 후 시점별 베스팅 값 확인', functi
      * @returns {bigint} 소수 2자리 기준 값(반올림 없음)
      */
     const to2dec = (x18) => BigInt(x18) / pow10(16);
-    
+
     /**
      * 
      * @param {*} vesting 
@@ -160,6 +163,12 @@ describe('scenario.01 — CSV 백필 후 시점별 베스팅 값 확인', functi
         console.log('    total boxes sold:', totalBoxes.toString());
     }
 
+    /**
+     * 
+     * @param {*} vesting 
+     * @param {*} VEST_START 
+     * @param {*} tsTarget 
+     */
     async function syncWeeklyUntil(vesting, VEST_START, tsTarget) {
         const targetDay = Math.floor((tsTarget - Number(VEST_START)) / 86400); // tsTarget이 속한 day index
         const lastSynced = Number(await vesting.lastSyncedDay());
@@ -173,6 +182,12 @@ describe('scenario.01 — CSV 백필 후 시점별 베스팅 값 확인', functi
         }
     }
     
+    /**
+     * 
+     * @param {*} vesting 
+     * @param {*} user 
+     * @param {*} ts 
+     */
     async function printFourMetricsAt(vesting, user, ts) {
         const buyTotal18 = await vesting.previewBuyerClaimableAt(user, ts);     // 18dec
         const buyY18     = await vesting.previewBuyerEarnedYesterday(user);     // 18dec (소수 6자리까지만 유효)
@@ -190,9 +205,7 @@ describe('scenario.01 — CSV 백필 후 시점별 베스팅 값 확인', functi
         console.log('    ref   total (2dec) :', formatAmount(to2dec(refTotal18), 2));
         console.log('    ref   last  (2dec) :', formatAmount(to2dec(refY18),     2));
     }
-
     
-
     /**
      * @notice 지정 시각(ts) 기준 구매자 누적/최근 하루치(전일) 출력
      * @dev 필요 시 syncLimitDay로 targetDay-1까지 확정
@@ -269,10 +282,11 @@ describe('scenario.01 — CSV 백필 후 시점별 베스팅 값 확인', functi
         await ethers.provider.send('evm_mine', []);
     }
 
+
     // -------------------------------------------------------------------------
     // 배포 및 백필
     // -------------------------------------------------------------------------
-    before(async function () {
+    beforeEach(async function () {
         // 1) 배포 (vestingFixture를 참조하되 인라인 구성)
         [owner] = await ethers.getSigners();
         const Fwd = await ethers.getContractFactory('WhitelistForwarder', owner);
@@ -293,6 +307,11 @@ describe('scenario.01 — CSV 백필 후 시점별 베스팅 값 확인', functi
 
         // 스케줄 초기화
         await vesting.initializeSchedule(VEST_ENDS, BUYER_TOTALS, REF_TOTALS);
+    });
+
+    it('2025-06-03 10:00 기준 누적/최근 하루치 출력', async function () {
+
+        const TS_2025_0603_1000 = 1748944800;
 
         // 2) CSV: 레퍼럴 선등록 → 구매 백필(bulk)
         const urows = parseUsersCsv();
@@ -304,123 +323,230 @@ describe('scenario.01 — CSV 백필 후 시점별 베스팅 값 확인', functi
 
         const prows = parsePurchasesCsv();
         if (prows.length) {
-            // 10개씩 벌크 호출
-            for (let i = 0; i < prows.length; i += 10) {
-                const batch = prows.slice(i, i + 10).map((r) => ({
-                    buyer: r.wallet,
-                    refCodeStr: r.ref,
-                    boxCount: r.amount,
-                    purchaseTs: r.purchaseTs,
-                    paidUnits: r.paidUnits,
-                }));
-                await vesting.connect(owner).backfillPurchaseBulkAt(batch);
+            // 1개씩 bulk 호출
+            for (let i = 0; i < prows.length; i += 1) {
+                const r = prows[i];
+                if(r.purchaseTs < TS_2025_0603_1000) {
+                    const batch = [{
+                        buyer: r.wallet,
+                        refCodeStr: r.ref,
+                        boxCount: r.amount,
+                        purchaseTs: r.purchaseTs,
+                        paidUnits: r.paidUnits,
+                    }];
+                    await vesting.connect(owner).backfillPurchaseBulkAt(batch);
+                }
             }
         }
-    });
-
-    it('2025-06-03 13:00 기준 누적/최근 하루치 출력', async function () {
-        const TS_2025_0603_1300 = 1748955600;
         console.log('\n=== [A] 0x7099..79C8 @ 2025-06-03 13:00 ===');
-        await printBuyerAtTs(vesting, WALLET_A, VEST_START, TS_2025_0603_1300);
-        await printRefAtTs(vesting, WALLET_A, VEST_START, TS_2025_0603_1300);
+        await printBuyerAtTs(vesting, WALLET_A, VEST_START, TS_2025_0603_1000);
+        await printRefAtTs(vesting, WALLET_A, VEST_START, TS_2025_0603_1000);
 
         console.log('\n=== [B] 0x3C44..93BC @ 2025-06-03 13:00 ===');
-        await printBuyerAtTs(vesting, WALLET_B, VEST_START, TS_2025_0603_1300);
-        await printRefAtTs(vesting, WALLET_B, VEST_START, TS_2025_0603_1300);
+        await printBuyerAtTs(vesting, WALLET_B, VEST_START, TS_2025_0603_1000);
+        await printRefAtTs(vesting, WALLET_B, VEST_START, TS_2025_0603_1000);
+
+        console.log('\n=== [C] 0x90F7..b906 @ 2025-06-03 13:00 ===');
+        await printBuyerAtTs(vesting, WALLET_C, VEST_START, TS_2025_0603_1000);
+        await printRefAtTs(vesting, WALLET_C, VEST_START, TS_2025_0603_1000);
+
+        console.log('\n=== [D] 0x15d3..6A65 @ 2025-06-03 13:00 ===');
+        await printBuyerAtTs(vesting, WALLET_D, VEST_START, TS_2025_0603_1000);
+        await printRefAtTs(vesting, WALLET_D, VEST_START, TS_2025_0603_1000);
+
+        console.log('\n=== [E] 0x9965..A4dc @ 2025-06-03 13:00 ===');
+        await printBuyerAtTs(vesting, WALLET_E, VEST_START, TS_2025_0603_1000);
+        await printRefAtTs(vesting, WALLET_E, VEST_START, TS_2025_0603_1000);
 
         await printTotalBoxPurchased(vesting);
     });
-    it('2025-06-04 13:00 기준 누적/최근 하루치 출력', async function () {
-        const TS_2025_0604_1300 = 1749042000;
-        console.log('\n=== [A] 0x7099..79C8 @ 2025-06-04 13:00 ===');
-        await printBuyerAtTs(vesting, WALLET_A, VEST_START, TS_2025_0604_1300);
-        await printRefAtTs(vesting, WALLET_A, VEST_START, TS_2025_0604_1300);
+    it('2025-06-04 10:00 기준 누적/최근 하루치 출력', async function () {
+        const TS_2025_0604_1000 = 1749031200;
+        // 2) CSV: 레퍼럴 선등록 → 구매 백필(bulk)
+        const urows = parseUsersCsv();
+        if (urows.length) {
+            const users = urows.map((r) => r.wallet);
+            const codes = urows.map((r) => r.code);
+            await vesting.connect(owner).setReferralCodesBulk(users, codes, true);
+        }
 
-        console.log('\n=== [B] 0x3C44..93BC @ 2025-06-04 13:00 ===');
-        await printBuyerAtTs(vesting, WALLET_B, VEST_START, TS_2025_0604_1300);
-        await printRefAtTs(vesting, WALLET_B, VEST_START, TS_2025_0604_1300);
+        const prows = parsePurchasesCsv();
+        if (prows.length) {
+            // 1개씩 bulk 호출
+            for (let i = 0; i < prows.length; i += 1) {
+                const r = prows[i];
+                if(r.purchaseTs < TS_2025_0604_1000) {
+                    const batch = [{
+                        buyer: r.wallet,
+                        refCodeStr: r.ref,
+                        boxCount: r.amount,
+                        purchaseTs: r.purchaseTs,
+                        paidUnits: r.paidUnits,
+                    }];
+                    await vesting.connect(owner).backfillPurchaseBulkAt(batch);
+                }
+            }
+        }
+        console.log('\n=== [A] 0x7099..79C8 @ 2025-06-03 13:00 ===');
+        await printBuyerAtTs(vesting, WALLET_A, VEST_START, TS_2025_0604_1000);
+        await printRefAtTs(vesting, WALLET_A, VEST_START, TS_2025_0604_1000);
+
+        console.log('\n=== [B] 0x3C44..93BC @ 2025-06-03 13:00 ===');
+        await printBuyerAtTs(vesting, WALLET_B, VEST_START, TS_2025_0604_1000);
+        await printRefAtTs(vesting, WALLET_B, VEST_START, TS_2025_0604_1000);
+
+        console.log('\n=== [C] 0x90F7..b906 @ 2025-06-03 13:00 ===');
+        await printBuyerAtTs(vesting, WALLET_C, VEST_START, TS_2025_0604_1000);
+        await printRefAtTs(vesting, WALLET_C, VEST_START, TS_2025_0604_1000);
+
+        console.log('\n=== [D] 0x15d3..6A65 @ 2025-06-03 13:00 ===');
+        await printBuyerAtTs(vesting, WALLET_D, VEST_START, TS_2025_0604_1000);
+        await printRefAtTs(vesting, WALLET_D, VEST_START, TS_2025_0604_1000);
+
+        console.log('\n=== [E] 0x9965..A4dc @ 2025-06-03 13:00 ===');
+        await printBuyerAtTs(vesting, WALLET_E, VEST_START, TS_2025_0604_1000);
+        await printRefAtTs(vesting, WALLET_E, VEST_START, TS_2025_0604_1000);
 
         await printTotalBoxPurchased(vesting);
     });
-    it('2026-06-01 13:00 기준 가격/베스팅 지표 출력', async function () {
+    it('2026-06-01 10:00 기준 가격/베스팅 지표 출력', async function () {
         // 1) 현재 시각 A에서 한 번 sync
-        await vesting.sync();
+        const A = (await ethers.provider.getBlock('latest')).timestamp;
+
+        // 2) 체인 시간을 미래(2026-06-01 10:00:00 UTC)로 이동
+        const targetTime = Math.floor(Date.parse('2026-06-01T10:00:00Z') / 1000);
+        await setNextBlockTimestamp(targetTime);
+
+        const urows = parseUsersCsv();
+        if (urows.length) {
+            const users = urows.map((r) => r.wallet);
+            const codes = urows.map((r) => r.code);
+            await vesting.connect(owner).setReferralCodesBulk(users, codes, true);
+        }
+
+        const prows = parsePurchasesCsv();
+        if (prows.length) {
+            // 1개씩 bulk 호출
+            for (let i = 0; i < prows.length; i += 1) {
+                const r = prows[i];
+                if(r.purchaseTs < targetTime) {
+                    const batch = [{
+                        buyer: r.wallet,
+                        refCodeStr: r.ref,
+                        boxCount: r.amount,
+                        purchaseTs: r.purchaseTs,
+                        paidUnits: r.paidUnits,
+                    }];
+                    await vesting.connect(owner).backfillPurchaseBulkAt(batch);
+                }
+            }
+        }
+        await vesting.syncLimitDay(1);
+        // 3) 주(7일) 단위로 syncLimitDay 진행 + 잔여 처리
+        await syncWeeklyUntil(vesting, VEST_START, targetTime);
+
+        // 4) 글로벌(총 판매수/1박스 가격) 출력 — 이 시점 상태로
+        await printTotalBoxPurchased(vesting);
+
+        // 5) 두 지갑의 4가지 지표 출력 (claimable/earnedYesterday, buyer/ref)
+        await printFourMetricsAt(vesting, WALLET_A, targetTime);
+        await printFourMetricsAt(vesting, WALLET_B, targetTime);
+        await printFourMetricsAt(vesting, WALLET_C, targetTime);
+        await printFourMetricsAt(vesting, WALLET_D, targetTime);
+        await printFourMetricsAt(vesting, WALLET_E, targetTime);
+    });
+    it('2026-06-02 10:00 기준 가격/베스팅 지표 출력', async function () {
+        // 1) 현재 시각 A에서 한 번 sync
         const A = (await ethers.provider.getBlock('latest')).timestamp;
 
         // 2) 체인 시간을 미래(2026-06-01 13:00:00 UTC)로 이동
-        const TS_2026_0601_1300 = Math.floor(Date.parse('2026-06-01T13:00:00Z') / 1000);
-        await setNextBlockTimestamp(TS_2026_0601_1300);
+        const targetTime = Math.floor(Date.parse('2026-06-02T10:00:00Z') / 1000);
+        await setNextBlockTimestamp(targetTime);
 
+        const urows = parseUsersCsv();
+        if (urows.length) {
+            const users = urows.map((r) => r.wallet);
+            const codes = urows.map((r) => r.code);
+            await vesting.connect(owner).setReferralCodesBulk(users, codes, true);
+        }
 
+        const prows = parsePurchasesCsv();
+        if (prows.length) {
+            // 1개씩 bulk 호출
+            for (let i = 0; i < prows.length; i += 1) {
+                const r = prows[i];
+                if(r.purchaseTs < targetTime) {
+                    const batch = [{
+                        buyer: r.wallet,
+                        refCodeStr: r.ref,
+                        boxCount: r.amount,
+                        purchaseTs: r.purchaseTs,
+                        paidUnits: r.paidUnits,
+                    }];
+                    await vesting.connect(owner).backfillPurchaseBulkAt(batch);
+                }
+            }
+        }
+        await vesting.syncLimitDay(1);
         // 3) 주(7일) 단위로 syncLimitDay 진행 + 잔여 처리
-        await syncWeeklyUntil(vesting, VEST_START, TS_2026_0601_1300);
+        await syncWeeklyUntil(vesting, VEST_START, targetTime);
 
         // 4) 글로벌(총 판매수/1박스 가격) 출력 — 이 시점 상태로
         await printTotalBoxPurchased(vesting);
 
         // 5) 두 지갑의 4가지 지표 출력 (claimable/earnedYesterday, buyer/ref)
-        await printFourMetricsAt(vesting, WALLET_A, TS_2026_0601_1300);
-        await printFourMetricsAt(vesting, WALLET_B, TS_2026_0601_1300);
-    });
-    it('2026-06-02 13:00 기준 가격/베스팅 지표 출력', async function () {
-        // 1) 현재 시각 A에서 한 번 sync
-        await vesting.sync();
-        const A = (await ethers.provider.getBlock('latest')).timestamp;
-
-        // 2) 체인 시간을 미래(2026-06-02 13:00:00 UTC)로 이동
-        const TS_2026_0602_1300 = Math.floor(Date.parse('2026-06-02T13:00:00Z') / 1000);
-        await setNextBlockTimestamp(TS_2026_0602_1300);
-
-
-        // 3) 주(7일) 단위로 syncLimitDay 진행 + 잔여 처리
-        await syncWeeklyUntil(vesting, VEST_START, TS_2026_0602_1300);
-
-        // 4) 글로벌(총 판매수/1박스 가격) 출력 — 이 시점 상태로
-        await printTotalBoxPurchased(vesting);
-
-        // 5) 두 지갑의 4가지 지표 출력 (claimable/earnedYesterday, buyer/ref)
-        await printFourMetricsAt(vesting, WALLET_A, TS_2026_0602_1300);
-        await printFourMetricsAt(vesting, WALLET_B, TS_2026_0602_1300);
+        await printFourMetricsAt(vesting, WALLET_A, targetTime);
+        await printFourMetricsAt(vesting, WALLET_B, targetTime);
+        await printFourMetricsAt(vesting, WALLET_C, targetTime);
+        await printFourMetricsAt(vesting, WALLET_D, targetTime);
+        await printFourMetricsAt(vesting, WALLET_E, targetTime);
     });
 
-    it('2029-06-01 13:00 기준 가격/베스팅 지표 출력', async function () {
+    it('2027-06-02 10:00 기준 가격/베스팅 지표 출력', async function () {
         // 1) 현재 시각 A에서 한 번 sync
-        await vesting.sync();
-        const A = (await ethers.provider.getBlock('latest')).timestamp;
-
-        // 2) 체인 시간을 미래(2029-06-01 13:00:00 UTC)로 이동
-        const TS_2029_0601_1300 = Math.floor(Date.parse('2029-06-01T13:00:00Z') / 1000);
-        await setNextBlockTimestamp(TS_2029_0601_1300);
-
-        // 3) 주(7일) 단위로 syncLimitDay 진행 + 잔여 처리
-        await syncWeeklyUntil(vesting, VEST_START, TS_2029_0601_1300);
-
-        // 4) 글로벌(총 판매수/1박스 가격) 출력 — 이 시점 상태로
-        await printTotalBoxPurchased(vesting);
-
-        // 5) 두 지갑의 4가지 지표 출력 (claimable/earnedYesterday, buyer/ref)
-        await printFourMetricsAt(vesting, WALLET_A, TS_2029_0601_1300);
-        await printFourMetricsAt(vesting, WALLET_B, TS_2029_0601_1300);
-    });
-
-    it('2029-06-02 13:00 기준 가격/베스팅 지표 출력', async function () {
-        // 1) 현재 시각 A에서 한 번 sync
-        await vesting.sync();
         const A = (await ethers.provider.getBlock('latest')).timestamp;
 
         // 2) 체인 시간을 미래(2026-06-01 13:00:00 UTC)로 이동
-        const TS_2029_0602_1300 = Math.floor(Date.parse('2029-06-02T13:00:00Z') / 1000);
-        await setNextBlockTimestamp(TS_2029_0602_1300);
+        const targetTime = Math.floor(Date.parse('2027-06-01T10:00:00Z') / 1000);
+        await setNextBlockTimestamp(targetTime);
 
+        const urows = parseUsersCsv();
+        if (urows.length) {
+            const users = urows.map((r) => r.wallet);
+            const codes = urows.map((r) => r.code);
+            await vesting.connect(owner).setReferralCodesBulk(users, codes, true);
+        }
+
+        const prows = parsePurchasesCsv();
+        if (prows.length) {
+            // 1개씩 bulk 호출
+            for (let i = 0; i < prows.length; i += 1) {
+                const r = prows[i];
+                if(r.purchaseTs < targetTime) {
+                    const batch = [{
+                        buyer: r.wallet,
+                        refCodeStr: r.ref,
+                        boxCount: r.amount,
+                        purchaseTs: r.purchaseTs,
+                        paidUnits: r.paidUnits,
+                    }];
+                    await vesting.connect(owner).backfillPurchaseBulkAt(batch);
+                }
+            }
+        }
+        await vesting.syncLimitDay(1);
         // 3) 주(7일) 단위로 syncLimitDay 진행 + 잔여 처리
-        await syncWeeklyUntil(vesting, VEST_START, TS_2029_0602_1300);
+        await syncWeeklyUntil(vesting, VEST_START, targetTime);
 
         // 4) 글로벌(총 판매수/1박스 가격) 출력 — 이 시점 상태로
         await printTotalBoxPurchased(vesting);
 
         // 5) 두 지갑의 4가지 지표 출력 (claimable/earnedYesterday, buyer/ref)
-        await printFourMetricsAt(vesting, WALLET_A, TS_2029_0602_1300);
-        await printFourMetricsAt(vesting, WALLET_B, TS_2029_0602_1300);
+        await printFourMetricsAt(vesting, WALLET_A, targetTime);
+        await printFourMetricsAt(vesting, WALLET_B, targetTime);
+        await printFourMetricsAt(vesting, WALLET_C, targetTime);
+        await printFourMetricsAt(vesting, WALLET_D, targetTime);
+        await printFourMetricsAt(vesting, WALLET_E, targetTime);
     });
 });
 

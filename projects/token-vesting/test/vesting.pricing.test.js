@@ -164,4 +164,82 @@ describe("TokenVesting - pricing & buyBox amount check (using vestingFixture)", 
             vesting.connect(buyer).buyBox(1, bad, p)
         ).to.be.revertedWith("referral code not found");
     });
+    // ─────────────────────────────────────────────────────────────────────────
+    // Referral discount tests
+    // ─────────────────────────────────────────────────────────────────────────
+    describe("TokenVesting - referral discount", function () {
+        it("setReferralDiscount: onlyOwner가 아니면 revert(OwnableUnauthorizedAccount)", async function () {
+            // owner가 아닌 buyer가 시도
+            await expect(
+                vesting.connect(buyer).setReferralDiscount(refCode, 10n)
+            ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount")
+            .withArgs(buyer.address);
+        });
+
+        it("setReferralDiscount: 존재하지 않는 코드면 'Referral is not exist'로 revert", async function () {
+            const nonExist = "A1B2C3D4"; // 아무도 소유하지 않은 코드(8자)
+            await expect(
+                vesting.connect(owner).setReferralDiscount(nonExist, 5n)
+            ).to.be.revertedWith("Referral is not exist");
+        });
+
+        it("setReferralDiscount: 코드 길이 오류면 'ref len!=8' revert", async function () {
+            const badLen = "SHORT"; // 5자
+            await expect(
+                vesting.connect(owner).setReferralDiscount(badLen, 5n)
+            ).to.be.revertedWith("ref len!=8");
+        });
+
+        it("setReferralDiscount: 100 초과는 'discount rate: out of range' revert", async function () {
+            await expect(
+                vesting.connect(owner).setReferralDiscount(refCode, 101n)
+            ).to.be.revertedWith("discount rate: out of range");
+        });
+
+        it("할인 정상 적용: 10% 설정 후 estimatedTotalAmount에 315 USDT(=350*0.9) 반영", async function () {
+            // 기준가(할인 전)
+            const base1 = await estimated(1);
+            expect(base1).to.equal(350n * ONE_USDT);
+
+            // 10% 할인 설정
+            await expect(vesting.connect(owner).setReferralDiscount(refCode, 10n))
+                .to.emit(vesting, "ReferralDiscountSet");
+
+            const p1 = await estimated(1);
+            expect(p1).to.equal(315n * ONE_USDT);
+
+            const p3 = await estimated(3);
+            expect(p3).to.equal(3n * 315n * ONE_USDT);
+        });
+
+        it("할인 극단값: 0%면 가격 동일, 100%면 0", async function () {
+            // 0% → 변화 없음
+            await vesting.connect(owner).setReferralDiscount(refCode, 0n);
+            const p0 = await estimated(2);
+            expect(p0).to.equal(2n * 350n * ONE_USDT);
+
+            // 100% → 0원
+            await vesting.connect(owner).setReferralDiscount(refCode, 100n);
+            const p100 = await estimated(5);
+            expect(p100).to.equal(0n);
+
+            // 다시 0%로 원복 → 기준가 복귀
+            await vesting.connect(owner).setReferralDiscount(refCode, 0n);
+            const pBack = await estimated(1);
+            expect(pBack).to.equal(350n * ONE_USDT);
+        });
+
+        it("할인 설정 후 buyBox도 할인된 금액으로 진행(estimate와 일치)", async function () {
+            await vesting.connect(owner).setReferralDiscount(refCode, 10n); // 10%
+
+            const est = await estimated(4);
+            const expected = 4n * 315n * ONE_USDT;
+            expect(est).to.equal(expected);
+
+            const p = { value: est, deadline: 0n, v: 0, r: ethers.ZeroHash, s: ethers.ZeroHash };
+            await expect(vesting.connect(buyer).buyBox(4, refCode, p))
+                .to.emit(vesting, "BoxesPurchased");
+        });
+    });
+
 });

@@ -1,7 +1,7 @@
 // test/vesting.delegate.buy.referral.errors.test.js
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { time } = require("@nomicfoundation/hardhat-network-helpers");
+// const { time } = require("@nomicfoundation/hardhat-network-helpers");
 const { deployFixture } = require("./helpers/vestingFixture");
 
 const ZERO_HASH = ethers.ZeroHash;
@@ -175,7 +175,9 @@ describe("TokenVesting.buyBox — 에러 케이스(Forwarder.execute 경유)", f
             await stableCoin.connect(ownerSigner).transfer(buyer.address, est);
         }
 
-        const past = BigInt((await time.latest())) - 1n;
+        // const past = BigInt((await time.latest())) - 1n;
+        const { timestamp: nowTs } = await ethers.provider.getBlock("latest");
+        const past = BigInt(nowTs) - 1n;
         const pExpired = { value: est, deadline: past, v: 27, r: ZERO_HASH, s: ZERO_HASH };
         const data = vesting.interface.encodeFunctionData("buyBox", [1n, ref, pExpired]);
 
@@ -215,7 +217,9 @@ describe("TokenVesting.buyBox — 에러 케이스(Forwarder.execute 경유)", f
             await stableCoin.connect(ownerSigner).transfer(buyer.address, est);
         }
 
-        const dl = BigInt((await time.latest())) + 3600n;
+        // const dl = BigInt((await time.latest())) + 3600n;
+        const { timestamp: nowTs2 } = await ethers.provider.getBlock("latest");
+        const dl = BigInt(nowTs2) + 3600n;
         // 메시지 owner는 buyer로 두고, 잘못된 서명자 시뮬레이션을 위해 임의 v/r/s 사용
         const wrongSig = { value: est, deadline: dl, v: 28, r: ZERO_HASH, s: ZERO_HASH };
         const data = vesting.interface.encodeFunctionData("buyBox", [1n, ref, wrongSig]);

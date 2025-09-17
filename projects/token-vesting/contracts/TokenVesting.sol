@@ -335,6 +335,18 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     event RecipientSet(address indexed newAddr);
 
     /**
+     * @notice 레퍼럴 discount 설정 이벤트
+     * @param addr 레퍼럴 소유자 주소
+     * @param code 레퍼럴코드 (bytes8 치환값)
+     * @param discount discount rate (0: discount 적용하지 않음)
+     */
+    event ReferralDiscountSet(
+        address indexed addr, 
+        bytes8 code, 
+        uint256 discount
+    );
+
+    /**
      * @notice BadgeSBT 토큰 민팅 완료 이벤트 - 새로운 SBT 토큰 생성
      * @param user SBT 토큰을 받은 사용자 주소
      * @param tokenId 새로 민팅된 SBT 토큰의 ID
@@ -476,6 +488,23 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
             bytes8 code = _normalizeToBytes8(codes[i]);
             _setReferralCodeInternal(users[i], code, overwrite);
         }
+    }
+
+    /**
+     * @notice 레퍼럴 discount를 설정한다.
+     * @param refCodeStr 레퍼럴 문자열
+     * @param discountRate discount rate (0 ~ 100)
+     * @dev onlyOwner
+     */
+    function setReferralDiscount(
+        string calldata refCodeStr, 
+        uint256 discountRate
+    ) public onlyOwner {
+        bytes8  code = _normalizeToBytes8(refCodeStr);
+        require(codeToOwner[code] != address(0), "Referral is not exist");
+        require(discountRate <= 100, "discount rate: out of range");
+        refDiscountOf[code] = discountRate;
+        emit ReferralDiscountSet(codeToOwner[code], code, discountRate);
     }
 
     /**
@@ -798,6 +827,27 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     }
 
     /**
+     * @notice bytes8 변수를 string으로 변환한다.
+     * @param code string으로 변환할 bytes8 변수
+     * @return 변환된 string값
+     * @dev 레퍼럴 (8자리 bytes)을 string으로 변환하기 위한 함수이다.
+     * ex.
+     *     code = bytes8(0x4142434445464748) → "ABCDEFGH"
+     *     code = bytes8(0x3031323334353637) → "01234567"
+    */
+    function bytes8ToString(bytes8 code) public pure returns (string memory) {
+        bytes memory out = new bytes(8);
+        uint64 v = uint64(code);
+        // bytes8의 각 byte를 masking하여 out 버퍼에 담음
+        for (uint256 i = 0; i < 8; i++) {
+            out[7 - i] = bytes1(uint8(v & 0xFF));
+            v >>= 8;
+        }
+        // out 버퍼를 string으로 형변환 (bytes와 string은 메모리 구조가 같음 => typecasting만으로 변환 가능)
+        return string(out);
+    }
+
+    /**
      * @notice 사용자의 레퍼럴 코드를 문자열로 조회
      * @param user 레퍼럴 코드를 조회할 사용자 주소
      * @return 8자리 레퍼럴 코드 문자열 (예: "ABCD1234")
@@ -806,7 +856,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     function getReferralCode(address user) external view returns (string memory) {
         bytes8 code = referralCodeOf[user];
         require(code != bytes8(0), "no code");
-        return _bytes8ToString(code);
+        return bytes8ToString(code);
     }
 
     /**
@@ -1468,27 +1518,6 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
             acc = (acc << 8) | uint64(c);
         }
         return bytes8(acc);
-    }
-
-    /**
-     * @notice bytes8 변수를 string으로 변환한다.
-     * @param code string으로 변환할 bytes8 변수
-     * @return 변환된 string값
-     * @dev 레퍼럴 (8자리 bytes)을 string으로 변환하기 위한 함수이다.
-     * ex.
-     *     code = bytes8(0x4142434445464748) → "ABCDEFGH"
-     *     code = bytes8(0x3031323334353637) → "01234567"
-    */
-    function _bytes8ToString(bytes8 code) internal pure returns (string memory) {
-        bytes memory out = new bytes(8);
-        uint64 v = uint64(code);
-        // bytes8의 각 byte를 masking하여 out 버퍼에 담음
-        for (uint256 i = 0; i < 8; i++) {
-            out[7 - i] = bytes1(uint8(v & 0xFF));
-            v >>= 8;
-        }
-        // out 버퍼를 string으로 형변환 (bytes와 string은 메모리 구조가 같음 => typecasting만으로 변환 가능)
-        return string(out);
     }
 
     /**

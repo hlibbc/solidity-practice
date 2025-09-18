@@ -130,10 +130,10 @@ async function main() {
             forwarder = await ethers.getContractAt('WhitelistForwarder', fwdAddr, owner);
         }
 
-        // 1) StableCoin(USDT) 배포 or 재사용
+        // 1) StableCoin 배포 or 재사용
         let stableAddr = STABLECOIN_ADDRESS;
         if (!stableAddr) {
-            console.log('\n1️⃣ StableCoin(USDT) 배포 중...(contracts/Usdt.sol: StableCoin)');
+            console.log('\n1️⃣ StableCoin 배포 중...(contracts/StableCoin.sol: StableCoin)');
             const Stable = await ethers.getContractFactory('StableCoin', owner);
             const stable = await Stable.deploy();
             const depTx1 = stable.deploymentTransaction();

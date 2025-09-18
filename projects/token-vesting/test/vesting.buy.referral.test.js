@@ -159,7 +159,7 @@ describe("vesting.buy.referral", function () {
         const deadline = BigInt((await ethers.provider.getBlock("latest")).timestamp) + 3600n;
         const domain = {
             name: await stableCoin.name(),
-            version: "1",
+            version: await stableCoin.version(),
             chainId: Number((await ethers.provider.getNetwork()).chainId),
             verifyingContract: await stableCoin.getAddress(),
         };

@@ -136,7 +136,7 @@ async function start() {
 
     const fwdAbi   = loadAbi('../../artifacts/contracts/Forwarder.sol/WhitelistForwarder.json');
     const vestAbi  = loadAbi('../../artifacts/contracts/TokenVesting.sol/TokenVesting.json');
-    const erc20Abi = loadAbi('../../artifacts/contracts/Usdt.sol/StableCoin.json');
+    const erc20Abi = loadAbi('../../artifacts/contracts/StableCoin.sol/StableCoin.json');
     const forwarderIface = new ethers.Interface(fwdAbi);
     const vestingIface   = new ethers.Interface(vestAbi);
     const erc20Iface     = new ethers.Interface(erc20Abi);

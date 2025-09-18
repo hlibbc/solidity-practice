@@ -1,0 +1,9 @@
+{
+    "solidity.compileUsingRemoteVersion": "v0.8.26+commit.XXXXXXX",
+    "solidity.remappings": [
+        "@openzeppelin/=node_modules/@openzeppelin/",
+        "@nomicfoundation/=node_modules/@nomicfoundation/",
+        "forge-std/=lib/forge-std/src/",
+        "@shared/=../lib-common/src/"
+    ]
+}

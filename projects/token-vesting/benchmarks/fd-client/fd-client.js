@@ -92,9 +92,9 @@ async function main() {
 
     const forwarderAddr    = dep?.forwarder;
     const tokenVestingAddr = dep?.contracts?.tokenVesting;
-    const usdtAddr         = dep?.contracts?.stableCoin;
+    const stableCoinAddr   = dep?.contracts?.stableCoin;
 
-    if (!ethers.isAddress(forwarderAddr) || !ethers.isAddress(tokenVestingAddr) || !ethers.isAddress(usdtAddr)) {
+    if (!ethers.isAddress(forwarderAddr) || !ethers.isAddress(tokenVestingAddr) || !ethers.isAddress(stableCoinAddr)) {
         throw new Error('❌ deployment-info.json에서 forwarder/tokenVesting/stableCoin 주소를 읽지 못했습니다.');
     }
 
@@ -112,30 +112,37 @@ async function main() {
     // ---- load ABIs ----
     const fwdAbi   = loadAbi('../../artifacts/contracts/Forwarder.sol/WhitelistForwarder.json');
     const vestAbi  = loadAbi('../../artifacts/contracts/TokenVesting.sol/TokenVesting.json');
-    const erc20Abi = loadAbi('../../artifacts/contracts/Usdt.sol/StableCoin.json');
+    const erc20Abi = loadAbi('../../artifacts/contracts/StableCoin.sol/StableCoin.json');
 
     const vestingIface = new ethers.Interface(vestAbi);
 
     // ---- contracts (RO) ----
     const vestingRO = new ethers.Contract(tokenVestingAddr, vestAbi, provider);
-    const usdt      = new ethers.Contract(usdtAddr, erc20Abi, provider);
+    const stableCoin = new ethers.Contract(stableCoinAddr, erc20Abi, provider);
 
     const { chainId } = await provider.getNetwork();
 
     // ---------------------------------------------------------------------
     // 3) 금액 산정 및 permit(EIP-2612) 서명
     // ---------------------------------------------------------------------
-    const tokenName = (await usdt.name?.().catch(() => 'Token')) || 'Token';
+    const tokenName =
+    (await (typeof stableCoin?.name === 'function'
+        ? stableCoin.name().catch(() => undefined)
+        : Promise.resolve(undefined))) ?? 'Token';
+    const version =
+    (await (typeof stableCoin?.version === 'function'
+        ? stableCoin.version().catch(() => undefined)
+        : Promise.resolve(undefined))) ?? '1';
     const estimated = await vestingRO.estimatedTotalAmount(amount, refCodeStr);
     if (estimated === 0n) throw new Error('❌ 유효하지 않은 레퍼럴 코드입니다. (estimatedTotalAmount=0)');
 
-    const nonceERC20    = await usdt.nonces(signer.address);
+    const nonceERC20    = await stableCoin.nonces(signer.address);
     const permitDeadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 30); // +30m
     const permitDomain = {
         name: tokenName,
-        version: '1',
+        version: version,
         chainId: Number(chainId),
-        verifyingContract: usdtAddr,
+        verifyingContract: stableCoinAddr,
     };
     const permitTypes = {
         Permit: [
@@ -304,18 +311,18 @@ async function main() {
         console.log(`  • user(${signer.address}): ${userEthBefore} ETH`);
 
         // 요청 전 사용자의 stableCoin 잔액도 출력
-        const usdtDecimals = await usdt.decimals();
-        const userTokenBefore = await usdt.balanceOf(signer.address);
+        const stableCoinDecimals = await stableCoin.decimals();
+        const userTokenBefore = await stableCoin.balanceOf(signer.address);
         console.log('\n💵 StableCoin 잔액 (요청 전)');
-        console.log(`  • user(${signer.address}): ${ethers.formatUnits(userTokenBefore, usdtDecimals)} token`);
+        console.log(`  • user(${signer.address}): ${ethers.formatUnits(userTokenBefore, stableCoinDecimals)} token`);
 
         // 요청 전 TokenVesting의 StableCoin 잔액 및 buybackUSDT(user) 출력
-        const vestingTokenBefore = await usdt.balanceOf(tokenVestingAddr);
+        const TVBefore = await stableCoin.balanceOf(tokenVestingAddr);
         const buybackBefore = await vestingRO.buybackUSDT(signer.address);
         console.log('\n🏦 TokenVesting StableCoin (요청 전)');
-        console.log(`  • vesting(${tokenVestingAddr}): ${ethers.formatUnits(vestingTokenBefore, usdtDecimals)} token`);
+        console.log(`  • vesting(${tokenVestingAddr}): ${ethers.formatUnits(TVBefore, stableCoinDecimals)} token`);
         console.log('\n🎁 buybackUSDT (요청 전)');
-        console.log(`  • user(${signer.address}): ${ethers.formatUnits(buybackBefore, usdtDecimals)} token`);
+        console.log(`  • user(${signer.address}): ${ethers.formatUnits(buybackBefore, stableCoinDecimals)} token`);
 
         // 요청 전 refCode로 조회된 추천인 주소의 buybackUSDT 출력
         const referrerAddr = await vestingRO.getRefererByCode(refCodeStr);
@@ -324,7 +331,7 @@ async function main() {
         console.log(`  • code: ${refCodeStr}`);
         console.log(`  • addr: ${referrerAddr}`);
         console.log('\n🎁 buybackUSDT (Referrer, 요청 전)');
-        console.log(`  • ref(${referrerAddr}): ${ethers.formatUnits(refBuybackBefore, usdtDecimals)} token`);
+        console.log(`  • ref(${referrerAddr}): ${ethers.formatUnits(refBuybackBefore, stableCoinDecimals)} token`);
 
         const resp = await postJson(endpoint, payload);
         console.log('\n[fd-server] HTTP Response');
@@ -341,22 +348,22 @@ async function main() {
         console.log(`  • user(${signer.address}): ${userEthAfter} ETH`);
 
         // 요청 후 사용자의 stableCoin 잔액도 출력
-        const userTokenAfter = await usdt.balanceOf(signer.address);
+        const userTokenAfter = await stableCoin.balanceOf(signer.address);
         console.log('\n💵 StableCoin 잔액 (요청 후)');
-        console.log(`  • user(${signer.address}): ${ethers.formatUnits(userTokenAfter, usdtDecimals)} token`);
+        console.log(`  • user(${signer.address}): ${ethers.formatUnits(userTokenAfter, stableCoinDecimals)} token`);
 
         // 요청 후 TokenVesting의 StableCoin 잔액 및 buybackUSDT(user) 출력
-        const vestingTokenAfter = await usdt.balanceOf(tokenVestingAddr);
+        const vestingTokenAfter = await stableCoin.balanceOf(tokenVestingAddr);
         const buybackAfter = await vestingRO.buybackUSDT(signer.address);
         console.log('\n🏦 TokenVesting StableCoin (요청 후)');
-        console.log(`  • vesting(${tokenVestingAddr}): ${ethers.formatUnits(vestingTokenAfter, usdtDecimals)} token`);
+        console.log(`  • vesting(${tokenVestingAddr}): ${ethers.formatUnits(vestingTokenAfter, stableCoinDecimals)} token`);
         console.log('\n🎁 buybackUSDT (요청 후)');
-        console.log(`  • user(${signer.address}): ${ethers.formatUnits(buybackAfter, usdtDecimals)} token`);
+        console.log(`  • user(${signer.address}): ${ethers.formatUnits(buybackAfter, stableCoinDecimals)} token`);
 
         // 요청 후 refCode로 조회된 추천인 주소의 buybackUSDT 출력
         const refBuybackAfter = await vestingRO.buybackUSDT(referrerAddr);
         console.log('\n🎁 buybackUSDT (Referrer, 요청 후)');
-        console.log(`  • ref(${referrerAddr}): ${ethers.formatUnits(refBuybackAfter, usdtDecimals)} token`);
+        console.log(`  • ref(${referrerAddr}): ${ethers.formatUnits(refBuybackAfter, stableCoinDecimals)} token`);
     } catch (err) {
         console.error('\n⚠️ 서버 전송 실패:', err?.message || String(err));
         console.error('   서버가 실행 중인지 확인하세요. (node benchmarks/fd-server/index.js)');

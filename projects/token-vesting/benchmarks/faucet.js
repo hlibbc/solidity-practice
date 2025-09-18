@@ -53,7 +53,7 @@ async function main() {
     if (amountWhole <= 0n) throw new Error('❌ faucet.json 의 amount 값이 유효하지 않습니다 (> 0 이어야 함).');
 
     // ---- load StableCoin ----
-    const erc20Abi = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../artifacts/contracts/Usdt.sol/StableCoin.json'), 'utf8')).abi;
+    const erc20Abi = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../artifacts/contracts/StableCoin.sol/StableCoin.json'), 'utf8')).abi;
     const token = new ethers.Contract(stableAddr, erc20Abi, owner);
 
     const decimals = Number(await token.decimals());

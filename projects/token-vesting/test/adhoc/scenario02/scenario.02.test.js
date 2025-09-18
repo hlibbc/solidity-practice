@@ -161,6 +161,11 @@ describe('scenario.02 — CSV 백필 후 시점별 베스팅 값 확인', functi
 
         console.log('\n[TOTAL-BOX PURCHASED]');
         console.log('    total boxes sold:', totalBoxes.toString());
+        console.log(`${WALLET_A}'s boxNum: ${await vesting.boxesOf(WALLET_A)}`)
+        console.log(`${WALLET_B}'s boxNum: ${await vesting.boxesOf(WALLET_B)}`)
+        console.log(`${WALLET_C}'s boxNum: ${await vesting.boxesOf(WALLET_C)}`)
+        console.log(`${WALLET_D}'s boxNum: ${await vesting.boxesOf(WALLET_D)}`)
+        console.log(`${WALLET_E}'s boxNum: ${await vesting.boxesOf(WALLET_E)}`)
     }
 
     /**
@@ -177,9 +182,9 @@ describe('scenario.02 — CSV 백필 후 시점별 베스팅 값 확인', functi
             await vesting.syncLimitDay(7);
             delta -= 7;
         }
-        if (delta > 0) {
-            await vesting.syncLimitDay(delta);
-        }
+        // if (delta > 0) {
+        //     await vesting.syncLimitDay(delta);
+        // }
     }
     
     /**
@@ -218,6 +223,7 @@ describe('scenario.02 — CSV 백필 후 시점별 베스팅 값 확인', functi
         const targetDay = Math.floor((ts - Number(VEST_START)) / 86400); // day index at ts
         const lastSynced = Number(await vesting.lastSyncedDay());
         const needFinal = Math.max(0, targetDay - lastSynced);
+        console.log('needFinal: ', needFinal)
         if (needFinal > 0) {
             await vesting.syncLimitDay(needFinal); // day 0..(targetDay-1) 확정
         }
@@ -506,9 +512,11 @@ describe('scenario.02 — CSV 백필 후 시점별 베스팅 값 확인', functi
         // 1) 현재 시각 A에서 한 번 sync
         const A = (await ethers.provider.getBlock('latest')).timestamp;
 
-        // 2) 체인 시간을 미래(2026-06-01 13:00:00 UTC)로 이동
-        const targetTime = Math.floor(Date.parse('2027-06-01T10:00:00Z') / 1000);
+        // 2) 체인 시간을 미래(2026-06-02 10:00:00 UTC)로 이동
+        const targetTime = Math.floor(Date.parse('2027-06-02T10:00:00Z') / 1000);
         await setNextBlockTimestamp(targetTime);
+
+
 
         const urows = parseUsersCsv();
         if (urows.length) {

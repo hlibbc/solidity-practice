@@ -151,10 +151,10 @@ async function main() {
 
     const forwarderAddr = dep?.forwarder;
     const tokenVestingAddr = dep?.contracts?.tokenVesting;
-    const usdtAddr = dep?.contracts?.stableCoin;
+    const stableCoinAddr = dep?.contracts?.stableCoin;
     const recipientAddr = dep?.contracts?.recipient;
 
-    if (!ethers.isAddress(forwarderAddr) || !ethers.isAddress(tokenVestingAddr) || !ethers.isAddress(usdtAddr)) {
+    if (!ethers.isAddress(forwarderAddr) || !ethers.isAddress(tokenVestingAddr) || !ethers.isAddress(stableCoinAddr)) {
         throw new Error('❌ deployment-info.json에서 forwarder/tokenVesting/stableCoin 주소를 읽지 못했습니다.');
     }
 
@@ -179,7 +179,7 @@ async function main() {
     console.log(`🔗 Network: chainId=${chainId} (${hre.network.name})`);
     console.log(`🧭 Forwarder: ${forwarderAddr}`);
     console.log(`📦 TokenVesting: ${tokenVestingAddr}`);
-    console.log(`💵 StableCoin: ${usdtAddr}`);
+    console.log(`💵 StableCoin: ${stableCoinAddr}`);
     console.log(`👤 Signer(from / _msgSender): ${buyerAddr}`);
     console.log(`🚚 Relayer(tx sender / gas payer): ${relayerAddr}`);
     console.log(`⛽ gas_call=${gasCall}  gas_execute=${gasExecute}  deadline(+secs)=${deadlineIn}`);
@@ -194,11 +194,21 @@ async function main() {
     const vestingIface = VestingFactory.interface;
 
     // StableCoin(permit 지원) 컨트랙트
-    const usdt = await ethers.getContractAt('StableCoin', usdtAddr, hre.ethers.provider);
-    const decimals = await usdt.decimals();
-    const symbol = (await usdt.symbol?.().catch(() => 'TOKEN')) || 'TOKEN';
-    const tokenName = (await usdt.name?.().catch(() => 'Token')) || 'Token';
-    const erc20Iface = usdt.interface;
+    const stableCoin = await ethers.getContractAt('StableCoin', stableCoinAddr, hre.ethers.provider);
+    const decimals = await stableCoin.decimals();
+    const symbol =
+    (await (typeof stableCoin?.symbol === 'function'
+        ? stableCoin.symbol().catch(() => undefined)
+        : Promise.resolve(undefined))) ?? 'TOKEN';
+    const tokenName =
+    (await (typeof stableCoin?.name === 'function'
+        ? stableCoin.name().catch(() => undefined)
+        : Promise.resolve(undefined))) ?? 'Token';
+    const version =
+    (await (typeof stableCoin?.version === 'function'
+        ? stableCoin.version().catch(() => undefined)
+        : Promise.resolve(undefined))) ?? '1';
+    const erc20Iface = stableCoin.interface;
 
     // ---- 견적 및 레퍼럴 유효성 ----
     const required = await vestingRead.estimatedTotalAmount(amount, refCodeStr);
@@ -206,13 +216,13 @@ async function main() {
     console.log(`\n🧮 필요 ${symbol}: ${ethers.formatUnits(required, decimals)} ${symbol}`);
 
     // ---- PERMIT(EIP-2612) 서명 (owner=buyer, spender=TokenVesting) ----
-    const permitNonce = await usdt.nonces(buyerAddr);
+    const permitNonce = await stableCoin.nonces(buyerAddr);
     const permitDeadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 30); // +30m
     const permitDomain = {
         name: tokenName,
-        version: '1',
+        version: version,
         chainId,
-        verifyingContract: usdtAddr,
+        verifyingContract: stableCoinAddr,
     };
     const permitTypes = {
         Permit: [
@@ -259,9 +269,9 @@ async function main() {
     console.log(`    • relayer : ${relayerEthBefore} ETH`);
 
     // ========= 잔액 점검 & 자동 충전 =========
-    let buyerBal = await usdt.balanceOf(buyerAddr);
-    const vestingBal = await usdt.balanceOf(tokenVestingAddr);
-    const recipBal = recipientAddr ? await usdt.balanceOf(recipientAddr) : 0n;
+    let buyerBal = await stableCoin.balanceOf(buyerAddr);
+    const vestingBal = await stableCoin.balanceOf(tokenVestingAddr);
+    const recipBal = recipientAddr ? await stableCoin.balanceOf(recipientAddr) : 0n;
     const totalBoxesBefore = await vestingRead.getTotalBoxPurchased();
     const totalRefsBefore = await vestingRead.getTotalReferralUnits();
 
@@ -278,7 +288,7 @@ async function main() {
         const ownerBase = new ethers.Wallet(OWNER_KEY, hre.ethers.provider);
         const ownerAddr = await ownerBase.getAddress();
         const need = required - buyerBal;
-        const ownerBal = await usdt.balanceOf(ownerAddr);
+        const ownerBal = await stableCoin.balanceOf(ownerAddr);
 
         console.log(`\n🤝 USDT 자동 충전: owner(${ownerAddr}) → buyer(${buyerAddr})`);
         console.log(`    • 필요한 금액 : ${ethers.formatUnits(need, decimals)} ${symbol}`);
@@ -290,7 +300,7 @@ async function main() {
             );
         }
 
-        const txFund = await usdt.connect(ownerBase).transfer(buyerAddr, need);
+        const txFund = await stableCoin.connect(ownerBase).transfer(buyerAddr, need);
         if (Shared?.withGasLog) {
             await Shared.withGasLog('[fund] owner→buyer USDT', Promise.resolve(txFund), {}, 'setup');
         }
@@ -298,7 +308,7 @@ async function main() {
         console.log('✅ 충전 완료. txHash:', rcFund.hash);
 
         // 충전 후 buyer 잔액 재조회
-        buyerBal = await usdt.balanceOf(buyerAddr);
+        buyerBal = await stableCoin.balanceOf(buyerAddr);
         console.log(`    • 충전 후 buyer 잔액: ${ethers.formatUnits(buyerBal, decimals)} ${symbol}`);
     }
 
@@ -381,9 +391,9 @@ async function main() {
     }
 
     // --- 실행 전 상태 스냅샷 ---
-    const buyerUSDTBefore     = await usdt.balanceOf(buyerAddr);
-    const vestingUSDTBefore   = await usdt.balanceOf(tokenVestingAddr);
-    const recipientUSDTBefore = recipientAddr ? await usdt.balanceOf(recipientAddr) : 0n;
+    const buyerUSDTBefore     = await stableCoin.balanceOf(buyerAddr);
+    const vestingUSDTBefore   = await stableCoin.balanceOf(tokenVestingAddr);
+    const recipientUSDTBefore = recipientAddr ? await stableCoin.balanceOf(recipientAddr) : 0n;
     const totalBoxes0         = await vestingRead.getTotalBoxPurchased();
     const totalRefs0          = await vestingRead.getTotalReferralUnits();
 
@@ -406,9 +416,9 @@ async function main() {
     }
 
     // --- 실행 후 검증 ---
-    const buyerUSDTAfter      = await usdt.balanceOf(buyerAddr);
-    const vestingUSDTAfter    = await usdt.balanceOf(tokenVestingAddr);
-    const recipientUSDTAfter  = recipientAddr ? await usdt.balanceOf(recipientAddr) : 0n;
+    const buyerUSDTAfter      = await stableCoin.balanceOf(buyerAddr);
+    const vestingUSDTAfter    = await stableCoin.balanceOf(tokenVestingAddr);
+    const recipientUSDTAfter  = recipientAddr ? await stableCoin.balanceOf(recipientAddr) : 0n;
     const totalBoxes1         = await vestingRead.getTotalBoxPurchased();
     const totalRefs1          = await vestingRead.getTotalReferralUnits();
 

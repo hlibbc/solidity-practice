@@ -100,6 +100,15 @@ function formatWithCommas(n) {
     return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function waitIfNeeded() {
+    if (hre.network.name === 'localhost' || hre.network.name === 'hardhat' || hre.network.name === 'development') {
+        console.log('⏳ 다음 tx를 위해 1초 대기...');
+        await sleep(1000);
+    }
+}
+
 // =============================================================================
 // 메인
 // =============================================================================
@@ -127,6 +136,7 @@ async function main() {
     const Token = await ethers.getContractFactory('Token', owner);
     const token = await Token.deploy();
     await token.waitForDeployment();
+    await waitIfNeeded();
     const tokenAddr = await token.getAddress();
     const tokenDec = await token.decimals();
     const scale = 10n ** BigInt(tokenDec);
@@ -146,6 +156,7 @@ async function main() {
         console.log('🛠️ Calling setVestingToken...');
         const tx = await vesting.setVestingToken(tokenAddr);
         await tx.wait();
+        await waitIfNeeded();
         console.log('✅ setVestingToken done.');
     } else {
         console.log('ℹ️ vestingToken is already set to this Token. Skipping.');
@@ -201,6 +212,7 @@ async function main() {
 
     const tx2 = await token.transfer(vestingAddr, amountWei);
     const rcpt2 = await tx2.wait();
+    await waitIfNeeded();
     console.log(`✅ Transfer tx: ${rcpt2.hash}`);
 
     // 6) 확인

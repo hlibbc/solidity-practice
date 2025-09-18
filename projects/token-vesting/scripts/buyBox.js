@@ -43,10 +43,10 @@ async function main() {
     const cfg = loadJSON(buyBoxPath);
 
     const tokenVestingAddr = dep?.contracts?.tokenVesting;
-    const usdtAddr = dep?.contracts?.stableCoin;
+    const stableCoinAddr = dep?.contracts?.stableCoin;
     const recipientAddr = dep?.contracts?.recipient;
 
-    if (!ethers.isAddress(tokenVestingAddr) || !ethers.isAddress(usdtAddr)) {
+    if (!ethers.isAddress(tokenVestingAddr) || !ethers.isAddress(stableCoinAddr)) {
         throw new Error('❌ deployment-info.json에서 주소를 읽지 못했습니다 (tokenVesting / stableCoin).');
     }
     if (!recipientAddr || !ethers.isAddress(recipientAddr)) {
@@ -59,7 +59,7 @@ async function main() {
 
     console.log('🌐 네트워크:', hre.network.name);
     console.log('📄 TokenVesting:', tokenVestingAddr);
-    console.log('📄 USDT:', usdtAddr);
+    console.log('📄 USDT:', stableCoinAddr);
     console.log('👤 구매자(지갑): PRIVATE_KEY 사용');
     console.log('🧾 amount(박스 수량):', amount.toString());
     console.log('🏷️ refCodeStr:', JSON.stringify(refCodeStr));
@@ -72,11 +72,21 @@ async function main() {
 
     // ── contracts
     const vesting = await ethers.getContractAt('TokenVesting', tokenVestingAddr, wallet);
-    const usdt = await ethers.getContractAt('StableCoin', usdtAddr, wallet); // artifact 이름 확인
+    const stableCoin = await ethers.getContractAt('StableCoin', stableCoinAddr, wallet); // artifact 이름 확인
 
-    const decimals = await usdt.decimals();
-    const symbol = (await usdt.symbol?.().catch(() => 'TOKEN')) || 'TOKEN';
-    const tokenName = (await usdt.name?.().catch(() => 'Token')) || 'Token';
+    const decimals = await stableCoin.decimals();
+    const symbol =
+    (await (typeof stableCoin?.symbol === 'function'
+        ? stableCoin.symbol().catch(() => undefined)
+        : Promise.resolve(undefined))) ?? 'TOKEN';
+    const tokenName =
+    (await (typeof stableCoin?.name === 'function'
+        ? stableCoin.name().catch(() => undefined)
+        : Promise.resolve(undefined))) ?? 'Token';
+    const version =
+    (await (typeof stableCoin?.version === 'function'
+        ? stableCoin.version().catch(() => undefined)
+        : Promise.resolve(undefined))) ?? '1';
 
     // ── 1) 견적: estimatedTotalAmount(uint256,string)
     let required;
@@ -91,9 +101,9 @@ async function main() {
     console.log(`\n🧮 필요 ${symbol} 금액:`, ethers.formatUnits(required, decimals), symbol);
 
     // ── 2) 잔액/사전 상태
-    let buyerBal = await usdt.balanceOf(buyerAddr);
-    const vestingBal = await usdt.balanceOf(tokenVestingAddr);
-    const recipBal = recipientAddr ? await usdt.balanceOf(recipientAddr) : 0n;
+    let buyerBal = await stableCoin.balanceOf(buyerAddr);
+    const vestingBal = await stableCoin.balanceOf(tokenVestingAddr);
+    const recipBal = recipientAddr ? await stableCoin.balanceOf(recipientAddr) : 0n;
     const totalBoxesBefore = await vesting.getTotalBoxPurchased();
     const totalRefsBefore = await vesting.getTotalReferralUnits();
 
@@ -117,7 +127,7 @@ async function main() {
             const ownerAddr = await owner.getAddress();
 
             const need = required - buyerBal; // 부족분만 충전
-            const ownerBal = await usdt.balanceOf(ownerAddr);
+            const ownerBal = await stableCoin.balanceOf(ownerAddr);
 
             console.log(`\n🤝 USDT 자동 충전: owner(${ownerAddr}) → buyer(${buyerAddr})`);
             console.log(`    • 필요한 금액 : ${ethers.formatUnits(need, decimals)} ${symbol}`);
@@ -127,7 +137,7 @@ async function main() {
                 throw new Error(`❌ OWNER의 USDT 부족: 필요=${ethers.formatUnits(need, decimals)} ${symbol}, 보유=${ethers.formatUnits(ownerBal, decimals)} ${symbol}`);
             }
 
-            const txFund = await usdt.connect(owner).transfer(buyerAddr, need);
+            const txFund = await stableCoin.connect(owner).transfer(buyerAddr, need);
             if (Shared?.withGasLog) {
                 await Shared.withGasLog('[fund] owner→buyer USDT', Promise.resolve(txFund), {}, 'setup');
             }
@@ -136,7 +146,7 @@ async function main() {
             await waitIfLocal();
 
             // 충전 후 buyer 잔액 재조회
-            buyerBal = await usdt.balanceOf(buyerAddr);
+            buyerBal = await stableCoin.balanceOf(buyerAddr);
             console.log(`    • 충전 후 buyer 잔액: ${ethers.formatUnits(buyerBal, decimals)} ${symbol}`);
         }
     }
@@ -149,13 +159,14 @@ async function main() {
     // ── 3) PERMIT 서명 생성 (EIP-2612)
     // OZ ERC20Permit 표준: Permit(owner, spender, value, nonce, deadline)
     const chain = await provider.getNetwork();
-    const nonce = await usdt.nonces(buyerAddr);
+    const nonce = await stableCoin.nonces(buyerAddr);
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 30); // 지금부터 30분
+    console.log(tokenName, version)
     const domain = {
         name: tokenName,
-        version: '1',
+        version: version,
         chainId: Number(chain.chainId),
-        verifyingContract: usdtAddr,
+        verifyingContract: stableCoinAddr,
     };
     const types = {
         Permit: [
@@ -180,9 +191,9 @@ async function main() {
     console.log('✅ permit 서명 완료');
 
     // ── 4) buyBox 전 잔액 재출력(선택)
-    const preBuyer = await usdt.balanceOf(buyerAddr);
-    const preVesting = await usdt.balanceOf(tokenVestingAddr);
-    const preRecip = recipientAddr ? await usdt.balanceOf(recipientAddr) : 0n;
+    const preBuyer = await stableCoin.balanceOf(buyerAddr);
+    const preVesting = await stableCoin.balanceOf(tokenVestingAddr);
+    const preRecip = recipientAddr ? await stableCoin.balanceOf(recipientAddr) : 0n;
 
     console.log('\n💰 buyBox 전 잔액');
     console.log(`    • buyer   :`, ethers.formatUnits(preBuyer, decimals), symbol);
@@ -211,9 +222,9 @@ async function main() {
     await waitIfLocal();
 
     // ── 6) buyBox 이후 잔액
-    const postBuyer = await usdt.balanceOf(buyerAddr);
-    const postVesting = await usdt.balanceOf(tokenVestingAddr);
-    const postRecip = recipientAddr ? await usdt.balanceOf(recipientAddr) : 0n;
+    const postBuyer = await stableCoin.balanceOf(buyerAddr);
+    const postVesting = await stableCoin.balanceOf(tokenVestingAddr);
+    const postRecip = recipientAddr ? await stableCoin.balanceOf(recipientAddr) : 0n;
 
     console.log('\n💰 buyBox 이후 잔액');
     console.log(`    • buyer   :`, ethers.formatUnits(postBuyer, decimals), symbol);
@@ -228,6 +239,7 @@ async function main() {
 main()
     .then(() => process.exit(0))
     .catch((e) => {
+        console.log(e)
         console.error('❌ 실행 실패:', e?.shortMessage || e?.message || e);
         process.exit(1);
     });

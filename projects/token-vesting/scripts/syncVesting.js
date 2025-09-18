@@ -62,6 +62,15 @@ function* sevenDayChunks(total) {
     }
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function waitIfNeeded() {
+    if (hre.network.name === 'localhost' || hre.network.name === 'hardhat' || hre.network.name === 'development') {
+        console.log('⏳ 다음 tx를 위해 1초 대기...');
+        await sleep(1000);
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // 메인
 // ──────────────────────────────────────────────────────────────────────────────
@@ -118,6 +127,7 @@ async function main() {
             vesting.syncLimitDay(days),
             totals, "sync"
         );
+        await waitIfNeeded();
         progressed += days;
         console.log(`[sync] progressed +${days.toString()} (total ${progressed.toString()}/${need.toString()})`);
     }

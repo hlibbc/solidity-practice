@@ -168,9 +168,9 @@ describe('scenario.01 — CSV 백필 후 시점별 베스팅 값 확인', functi
             await vesting.syncLimitDay(7);
             delta -= 7;
         }
-        if (delta > 0) {
-            await vesting.syncLimitDay(delta);
-        }
+        // if (delta > 0) {
+        //     await vesting.syncLimitDay(delta);
+        // }
     }
     
     async function printFourMetricsAt(vesting, user, ts) {

@@ -1113,17 +1113,44 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * APP에서 호출됨
      */
     function previewBuyerEarnedYesterday(address user) external view returns (uint256 pay6) {
-        // 오늘 자정 시각 계산
+        // uint256 todayStart = _dayStart(block.timestamp);
+        // if (todayStart <= vestingStartDate || lastSyncedDay == 0) {
+        //     return 0; // 확정된 날이 아직 없음
+        // }
+
+        // // 어제 인덱스
+        // uint256 yIndex = ((todayStart - vestingStartDate) / SECONDS_PER_DAY) - 1;
+
+        // // 아직 어제가 확정되지 않았다면, 가장 최근 확정일로 클램프
+        // uint256 lastFinal = lastSyncedDay - 1;
+        // if (yIndex > lastFinal) {
+        //     yIndex = lastFinal;
+        // }
+
+        // // 확정된 하루치(18dec): per * balance
+        // uint256 per = rewardPerBox[yIndex]; // 18dec
+        // uint256 bal = _balanceAtDay(buyerBoxAmountHistory[user], yIndex);
+        // uint256 amount18 = per * bal;
+
+        // return _applyFloor6(amount18); // 6dec 절삭
+
         uint256 todayStart = _dayStart(block.timestamp);
-        if (todayStart <= vestingStartDate) {
-            return 0;
-        }
-        // 어제 날짜 인덱스 계산 (오늘 - 1)
+        if (todayStart <= vestingStartDate) return 0;
+
         uint256 yIndex = ((todayStart - vestingStartDate) / SECONDS_PER_DAY) - 1;
-        // 어제 하루치 보상 계산 (18 decimals)
-        uint256 amount = _previewBuyerPendingAt(user, yIndex, yIndex);
-        // 6 decimals로 절삭하여 반환
-        return _applyFloor6(amount);
+        uint256 amount18;
+
+        if (lastSyncedDay != 0 && yIndex < lastSyncedDay) {
+            // 이미 확정된 '어제'라면 확정값 사용
+            uint256 per = rewardPerBox[yIndex]; // 18dec
+            uint256 bal = _balanceAtDay(buyerBoxAmountHistory[user], yIndex);
+            amount18 = per * bal;
+        } else {
+            // 미확정이면 1일치 시뮬레이션으로 계산
+            amount18 = _previewBuyerPendingAt(user, yIndex, yIndex); // 18dec
+        }
+
+        return _applyFloor6(amount18);
     }
 
     /**
@@ -1138,17 +1165,41 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * - 실시간 대시보드나 UI 표시용으로 활용 가능
      */
     function previewReferrerEarnedYesterday(address user) external view returns (uint256 pay6) {
-        // 오늘 자정 시각 계산
+        // uint256 todayStart = _dayStart(block.timestamp);
+        // if (todayStart <= vestingStartDate || lastSyncedDay == 0) {
+        //     return 0; // 확정된 날이 아직 없음
+        // }
+
+        // uint256 yIndex = ((todayStart - vestingStartDate) / SECONDS_PER_DAY) - 1;
+
+        // uint256 lastFinal = lastSyncedDay - 1;
+        // if (yIndex > lastFinal) {
+        //     yIndex = lastFinal;
+        // }
+
+        // uint256 per = rewardPerReferral[yIndex]; // 18dec
+        // uint256 bal = _balanceAtDay(referralAmountHistory[user], yIndex);
+        // uint256 amount18 = per * bal;
+
+        // return _applyFloor6(amount18); // 6dec 절삭
+
         uint256 todayStart = _dayStart(block.timestamp);
         if (todayStart <= vestingStartDate) {
             return 0;
         }
-        // 어제 날짜 인덱스 계산 (오늘 - 1)
+
         uint256 yIndex = ((todayStart - vestingStartDate) / SECONDS_PER_DAY) - 1;
-        // 어제 하루치 레퍼럴 보상 계산 (18 decimals)
-        uint256 amount = _previewRefPendingAt(user, yIndex, yIndex);
-        // 6 decimals로 절삭하여 반환
-        return _applyFloor6(amount);
+        uint256 amount18;
+
+        if (lastSyncedDay != 0 && yIndex < lastSyncedDay) {
+            uint256 per = rewardPerReferral[yIndex]; // 18dec
+            uint256 bal = _balanceAtDay(referralAmountHistory[user], yIndex);
+            amount18 = per * bal;
+        } else {
+            amount18 = _previewRefPendingAt(user, yIndex, yIndex); // 18dec
+        }
+
+        return _applyFloor6(amount18);
     }
 
     /**
@@ -1385,7 +1436,8 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         if (fromDay0 <= toDay0) {
             total += _calcByHistory(buyerBoxAmountHistory[user], cumRewardPerBox, fromDay0, toDay0);
         }
-        uint256 startSim = fromDay0 > lastSyncedDay ? fromDay0 : lastSyncedDay;
+        // uint256 startSim = fromDay0 > lastSyncedDay ? fromDay0 : lastSyncedDay;
+        uint256 startSim = lastSyncedDay;
         if (dNext > lastSyncedDay && startSim <= previewLast) {
             total += _previewBuyerPendingAt(user, startSim, previewLast);
         }
@@ -1410,7 +1462,8 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         if (fromDay0 <= toDay0) {
             total += _calcByHistory(referralAmountHistory[user], cumRewardPerReferral, fromDay0, toDay0);
         }
-        uint256 startSim = fromDay0 > lastSyncedDay ? fromDay0 : lastSyncedDay;
+        // uint256 startSim = fromDay0 > lastSyncedDay ? fromDay0 : lastSyncedDay;
+        uint256 startSim = lastSyncedDay;
         if (dNext > lastSyncedDay && startSim <= previewLast) {
             total += _previewRefPendingAt(user, startSim, previewLast);
         }
@@ -1710,7 +1763,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         uint256 prevBoxes = (lastSyncedDay == 0) ? 0 : cumBoxes[lastSyncedDay - 1];
 
         // lastSyncedDay..(startSim-1) 사이에 확정은 안 되었지만 기록된 판매량을 가상 누적치에 더해,
-        // startSim의 "전일 누적"을 prevBoxes로 맞춰둔다.
+        // startSim의 "당일 누적"을 prevBoxes로 맞춰둔다.
         if (startSim > lastSyncedDay) {
             for (uint256 dd = lastSyncedDay; dd < startSim; dd++) {
                 prevBoxes += boxesAddedPerDay[dd];

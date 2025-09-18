@@ -103,7 +103,7 @@ describe("vesting.delegate.buy.referral (via ERC-2771 Forwarder.execute)", funct
         const { chainId } = await ethers.provider.getNetwork();
         const domain = {
             name: await stableCoin.name(),
-            version: "1",
+            version: await stableCoin.version(),
             chainId: Number(chainId),
             verifyingContract: await stableCoin.getAddress(),
         };

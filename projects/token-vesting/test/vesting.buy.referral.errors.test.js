@@ -15,7 +15,7 @@ async function signPermit(ownerSigner, stableCoin, vesting, value, deadlineSecon
     const chainId = Number((await ethers.provider.getNetwork()).chainId);
     const domain = {
         name: await stableCoin.name(),
-        version: "1",
+        version: await stableCoin.symbol(),
         chainId,
         verifyingContract: await stableCoin.getAddress(),
     };

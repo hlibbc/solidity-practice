@@ -922,10 +922,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         string calldata refCodeStr 
     ) external view returns (uint256 price) {
         bytes8  code = _normalizeToBytes8(refCodeStr);
-        if (codeToOwner[code] == address(0)) {
-            return 0;
-        }
-        uint256 discountRate = refDiscountOf[code];
+        uint256 discountRate = (codeToOwner[code] == address(0))? 0: refDiscountOf[code];
         price = _calculatePurchasePrice(1, discountRate);
     }
 

@@ -1,0 +1,5 @@
+# 02_commitments-merkle/.gitignore
+build/
+cache/
+artifacts/
+*.zkey

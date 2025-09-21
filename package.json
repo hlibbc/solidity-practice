@@ -12,5 +12,9 @@
   "packageManager": "pnpm@10.16.1",
   "dependencies": {
     "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "circomlib": "^2.0.5",
+    "circomlibjs": "^0.0.8"
   }
 }

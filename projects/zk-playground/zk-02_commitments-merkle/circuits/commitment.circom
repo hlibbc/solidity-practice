@@ -1,5 +1,5 @@
 pragma circom 2.1.6;
-include "circomlib/poseidon.circom";
+include "poseidon.circom";
 
 template Commitment() {
     signal input secret; // private

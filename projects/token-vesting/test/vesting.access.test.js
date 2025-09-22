@@ -19,9 +19,26 @@
 
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { deployFixture } = require("./helpers/vestingFixture");
+const { deployFixture, deployFixtureWithOwner } = require("./helpers/vestingFixture");
 
 describe("vesting.access (onlyOwner guard)", function () {
+    it("constructor owner override: oldOwner는 거부되고 newOwner는 통과", async () => {
+        const [, newOwner] = await ethers.getSigners();
+        const { oldOwner, vesting, stableCoin } = await deployFixtureWithOwner(newOwner);
+
+        // console.log(oldOwner.address)
+        // console.log(newOwner.address)
+
+        // oldOwner로 호출 → 거부
+        await expect(
+            vesting.connect(oldOwner).setVestingToken(await stableCoin.getAddress())
+        ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount").withArgs(oldOwner.address);
+
+        // newOwner로 호출 → 통과(정상 실행). 트랜잭션 성공만 확인
+        // await expect(
+        //     vesting.connect(newOwner).setVestingToken(await stableCoin.getAddress())
+        // ).to.not.be.reverted;
+    });
 
     it("initializeSchedule: onlyOwner", async () => {
         const { vesting, buyer, start, DAY } = await deployFixture();

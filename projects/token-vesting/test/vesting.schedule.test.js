@@ -156,11 +156,12 @@ describe("vesting.schedule", function () {
 
         // === TokenVesting 배포 (새 생성자: forwarder, stableCoin, start) ===
         const now = BigInt((await ethers.provider.getBlock("latest")).timestamp);
-        const TV = await ethers.getContractFactory("TokenVesting");
+        const TV = await ethers.getContractFactory('TokenVesting');
         const vesting = await TV.deploy(
-            ethers.ZeroAddress,                    // forwarder: ZeroAddress
-            await stableCoin.getAddress(),         // stableCoin: StableCoin 컨트랙트 주소
-            now                                    // start: 현재 블록 타임스탬프
+            ethers.ZeroAddress, // forwarder: ZeroAddress
+            await stableCoin.getAddress(), // stableCoin: StableCoin 컨트랙트 주소
+            owner.address,
+            now // start: 현재 블록 타임스탬프
         );
 
         // === BadgeSBT 배포: admin = vesting (mint/upgrade가 onlyAdmin이므로) ===

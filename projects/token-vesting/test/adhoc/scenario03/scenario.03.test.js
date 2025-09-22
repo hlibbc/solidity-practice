@@ -332,6 +332,7 @@ describe('scenario.03 — 01:00/13:00 시점 지표 + 2026-06-01 12:00 클레임
         vesting = await TV.deploy(
             await forwarder.getAddress(),
             await stableCoin.getAddress(),
+            owner.address,
             VEST_START
         );
         await vesting.waitForDeployment();
@@ -350,7 +351,7 @@ describe('scenario.03 — 01:00/13:00 시점 지표 + 2026-06-01 12:00 클레임
     // -------------------------------------------------------------------------
     // it 블록들 — 요청된 4개 시각
     // -------------------------------------------------------------------------
-    it('2025-06-03 01:00:00 기준', async function () {
+    it('[ADHOC]: 2025-06-03 01:00:00 기준', async function () {
         const TS = Math.floor(Date.parse('2025-06-03T01:00:00Z') / 1000);
         await backfillHistoryUntil(vesting, TS);
         await printFourMetricsAt(vesting, WALLET_X, TS);
@@ -359,7 +360,7 @@ describe('scenario.03 — 01:00/13:00 시점 지표 + 2026-06-01 12:00 클레임
         console.log('[TOTAL-BOX-PURCHASED]', (await vesting.getTotalBoxPurchased()).toString());
     });
 
-    it('2026-06-01 01:00:00 기준', async function () {
+    it('[ADHOC]: 2026-06-01 01:00:00 기준', async function () {
         const TS = Math.floor(Date.parse('2026-06-01T01:00:00Z') / 1000);
         await setNextBlockTimestamp(TS);
         await backfillHistoryUntil(vesting, TS);
@@ -370,7 +371,7 @@ describe('scenario.03 — 01:00/13:00 시점 지표 + 2026-06-01 12:00 클레임
         console.log('[TOTAL-BOX-PURCHASED]', (await vesting.getTotalBoxPurchased()).toString());
     });
 
-    it('2026-06-01 13:00:00 기준 (12:00 A/B 클레임 후)', async function () {
+    it('[ADHOC]: 2026-06-01 13:00:00 기준 (12:00 A/B 클레임 후)', async function () {
         const CLAIM_TS = Math.floor(Date.parse('2026-06-01T12:00:00Z') / 1000);
         const TARGET_TS = Math.floor(Date.parse('2026-06-01T13:00:00Z') / 1000);
 
@@ -406,7 +407,7 @@ describe('scenario.03 — 01:00/13:00 시점 지표 + 2026-06-01 12:00 클레임
         console.log('[TOTAL-BOX-PURCHASED]', (await vesting.getTotalBoxPurchased()).toString());
     });
 
-    it('2026-06-02 01:00:00 기준 (전일 12:00 A/B 클레임 이후)', async function () {
+    it('[ADHOC]: 2026-06-02 01:00:00 기준 (전일 12:00 A/B 클레임 이후)', async function () {
         const CLAIM_TS = Math.floor(Date.parse('2026-06-01T12:00:00Z') / 1000);
         const TARGET_TS = Math.floor(Date.parse('2026-06-02T01:00:00Z') / 1000);
 

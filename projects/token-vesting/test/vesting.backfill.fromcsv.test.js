@@ -68,10 +68,10 @@ function parsePurchasesCsv(csvText) {
 
     const headerMap = {
         wallet: lower.findIndex(h => ["wallet_address","address","wallet"].includes(h)),
-        ref:    lower.findIndex(h => ["referral","refcode","code","ref"].includes(h)),
+        ref:    lower.findIndex(h => ["referral","referral_code","refcode","code","ref"].includes(h)),
         amount: lower.findIndex(h => ["amount","qty","box","box_count"].includes(h)),
-        price:  lower.findIndex(h => ["avg_price","unit_price","price"].includes(h)),
-        time:   lower.findIndex(h => ["created_at","create_at","timestamp"].includes(h)),
+        price:  lower.findIndex(h => ["avg_price","unit_price","price","usdt"].includes(h)),
+        time:   lower.findIndex(h => ["created_at","create_at","updated_at","timestamp"].includes(h)),
     };
 
     const hasHeader = Object.values(headerMap).some(i => i !== -1);
@@ -185,6 +185,8 @@ describe("vesting.backfill.fromcsv", function () {
             const buyerAddr = ethers.getAddress(row.wallet);
             const refCodeStr = normalizeCodeMaybeEmpty(row.ref);
             const boxCount = parseBoxCount(row.amount);
+            // Amount=0 행은 on-chain 백필 시 'box=0'로 리버트되므로 스킵
+            if (boxCount === 0n) continue;
             const price6 = parseUsdtUnits6(row.price);
             const paidUnits = boxCount * price6;
             const purchaseTs = parseEpochSeconds(row.time);

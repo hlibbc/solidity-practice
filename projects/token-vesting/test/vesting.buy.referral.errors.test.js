@@ -99,7 +99,8 @@ describe("TokenVesting.buyBox — 에러 케이스(직접 호출, Forwarder 미�
         await ensureBalance(stableCoin, buyer.address, est);
 
         const wrong = est - 1n; // 일부러 1 줄임
-        const deadline = BigInt((await time.latest())) + 3600n;
+        const { timestamp: nowTs } = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(nowTs) + 3600n;
         const { v, r, s } = await signPermit(buyer, stableCoin, vesting, wrong, deadline);
 
         await expect(
@@ -115,7 +116,8 @@ describe("TokenVesting.buyBox — 에러 케이스(직접 호출, Forwarder 미�
         expect(est).to.be.gt(0n);
         await ensureBalance(stableCoin, buyer.address, est);
 
-        const past = BigInt((await time.latest())) - 1n;
+        const { timestamp: nowTsPast } = await ethers.provider.getBlock("latest");
+        const past = BigInt(nowTsPast) - 1n;
         const { v, r, s } = await signPermit(buyer, stableCoin, vesting, est, past);
 
         await expect(
@@ -139,7 +141,8 @@ describe("TokenVesting.buyBox — 에러 케이스(직접 호출, Forwarder 미�
         await vesting.connect(owner).setRecipient(owner.address);
         await ensureBalance(stableCoin, buyer.address, est);
 
-        const deadline = BigInt((await time.latest())) + 3600n;
+        const { timestamp: nowTs3 } = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(nowTs3) + 3600n;
 
         // 메시지의 owner는 buyer로 넣되, stranger가 서명 → 서명자 불일치
         const { v, r, s } = await signPermit(

@@ -44,7 +44,7 @@ async function main() {
     console.log("🔗 StableCoin:", stableAddr);
 
     // ── 2) buyback 가능한 금액 조회 (StableCoin 최소단위)
-    const buyback = await vesting.buybackUSDT(wallet.address);
+    const buyback = await vesting.buybackStableCoinAmount(wallet.address);
     console.log("\n=== Buyback (claimable) ===");
     console.log("raw     :", buyback.toString());
     console.log("formatted:", ethers.formatUnits(buyback, stableDecimals), "token");

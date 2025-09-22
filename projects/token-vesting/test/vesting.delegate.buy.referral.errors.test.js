@@ -55,18 +55,19 @@ describe("TokenVesting.buyBox — 에러 케이스(Forwarder.execute 경유)", f
         const data = vesting.interface.encodeFunctionData("buyBox", [0n, ref, pSkip]);
 
         const nonce = await forwarder.nonces(buyer.address);
+        const { timestamp: nowTs0 } = await ethers.provider.getBlock("latest");
         const req = {
             from: buyer.address,
             to: await vesting.getAddress(),
             value: 0n,
-            gas: 1_000_000n,
+            gas: 200_000n,
             nonce,
-            deadline: Math.floor(Date.now() / 1000) + 3600,
+            deadline: Number(nowTs0) + 3600,
             data,
         };
         const signature = await signForwardRequest(buyer, forwarder, req);
         const requestWithSig = { ...req, signature };
-
+        
         await expect(forwardExecute(owner, forwarder, requestWithSig))
             .to.be.revertedWith("box=0");
     });
@@ -79,13 +80,14 @@ describe("TokenVesting.buyBox — 에러 케이스(Forwarder.execute 경유)", f
         const data = vesting.interface.encodeFunctionData("buyBox", [1n, badRef, pSkip]);
 
         const nonce = await forwarder.nonces(buyer.address);
+        const { timestamp: nowTs0 } = await ethers.provider.getBlock("latest");
         const req = {
             from: buyer.address,
             to: await vesting.getAddress(),
             value: 0n,
-            gas: 1_000_000n,
+            gas: 200_000n,
             nonce,
-            deadline: Math.floor(Date.now() / 1000) + 3600,
+            deadline: Number(nowTs0) + 3600,
             data,
         };
         const signature = await signForwardRequest(buyer, forwarder, req);
@@ -103,13 +105,14 @@ describe("TokenVesting.buyBox — 에러 케이스(Forwarder.execute 경유)", f
         const data = vesting.interface.encodeFunctionData("buyBox", [1n, myCode, pSkip]);
 
         const nonce = await forwarder.nonces(buyer.address);
+        const { timestamp: nowTs0 } = await ethers.provider.getBlock("latest");
         const req = {
             from: buyer.address,
             to: await vesting.getAddress(),
             value: 0n,
-            gas: 1_000_000n,
+            gas: 200_000n,
             nonce,
-            deadline: Math.floor(Date.now() / 1000) + 3600,
+            deadline: Number(nowTs0) + 3600,
             data,
         };
         const signature = await signForwardRequest(buyer, forwarder, req);
@@ -137,8 +140,8 @@ describe("TokenVesting.buyBox — 에러 케이스(Forwarder.execute 경유)", f
         }
 
         const wrong = est - 1n;
-        const now = BigInt((await ethers.provider.getBlock("latest")).timestamp);
-        const deadline = now + 3600n;
+        const { timestamp: nowTs } = await ethers.provider.getBlock("latest");
+        const deadline = BigInt(nowTs) + 3600n;
 
         const pWrong = { value: wrong, deadline, v: 0, r: ZERO_HASH, s: ZERO_HASH };
         const data = vesting.interface.encodeFunctionData("buyBox", [boxCount, ref, pWrong]);
@@ -148,7 +151,7 @@ describe("TokenVesting.buyBox — 에러 케이스(Forwarder.execute 경유)", f
             from: buyer.address,
             to: await vesting.getAddress(),
             value: 0n,
-            gas: 1_000_000n,
+            gas: 200_000n,
             nonce,
             deadline: Number(deadline),
             data,
@@ -182,13 +185,14 @@ describe("TokenVesting.buyBox — 에러 케이스(Forwarder.execute 경유)", f
         const data = vesting.interface.encodeFunctionData("buyBox", [1n, ref, pExpired]);
 
         const nonce = await forwarder.nonces(buyer.address);
+        const { timestamp: nowTs0 } = await ethers.provider.getBlock("latest");
         const req = {
             from: buyer.address,
             to: await vesting.getAddress(),
             value: 0n,
-            gas: 1_000_000n,
+            gas: 200_000n,
             nonce,
-            deadline: Math.floor(Date.now() / 1000) + 3600,
+            deadline: Number(nowTs0) + 3600,
             data,
         };
         const signature = await signForwardRequest(buyer, forwarder, req);
@@ -229,7 +233,7 @@ describe("TokenVesting.buyBox — 에러 케이스(Forwarder.execute 경유)", f
             from: buyer.address,
             to: await vesting.getAddress(),
             value: 0n,
-            gas: 1_000_000n,
+            gas: 200_000n,
             nonce,
             deadline: Number(dl),
             data,
@@ -265,13 +269,14 @@ describe("TokenVesting.buyBox — 에러 케이스(Forwarder.execute 경유)", f
         const data = vesting.interface.encodeFunctionData("buyBox", [1n, ref, pSkip]);
 
         const nonce = await forwarder.nonces(buyer.address);
+        const { timestamp: nowTs0 } = await ethers.provider.getBlock("latest");
         const req = {
             from: buyer.address,
             to: await vesting.getAddress(),
             value: 0n,
-            gas: 1_000_000n,
+            gas: 200_000n,
             nonce,
-            deadline: Math.floor(Date.now() / 1000) + 3600,
+            deadline: Number(nowTs0) + 3600,
             data,
         };
         const signature = await signForwardRequest(buyer, forwarder, req);
@@ -297,13 +302,14 @@ describe("TokenVesting.buyBox — 에러 케이스(Forwarder.execute 경유)", f
         const data = vesting.interface.encodeFunctionData("buyBox", [1n, ref, pSkip]);
 
         const nonce = await forwarder.nonces(buyer.address);
+        const { timestamp: nowTs0 } = await ethers.provider.getBlock("latest");
         const req = {
             from: buyer.address,
             to: await vesting.getAddress(),
             value: 0n,
-            gas: 1_000_000n,
+            gas: 200_000n,
             nonce,
-            deadline: Math.floor(Date.now() / 1000) + 3600,
+            deadline: Number(nowTs0) + 3600,
             data,
         };
         const signature = await signForwardRequest(buyer, forwarder, req);

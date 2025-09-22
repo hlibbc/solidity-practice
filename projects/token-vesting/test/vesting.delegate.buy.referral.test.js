@@ -175,13 +175,14 @@ describe("vesting.delegate.buy.referral (via ERC-2771 Forwarder.execute)", funct
         const data = vesting.interface.encodeFunctionData("buyBox", [boxCount, myCode, pSkip]);
 
         const nonce = await forwarder.nonces(buyer.address);
+        const { timestamp: nowTs0 } = await ethers.provider.getBlock("latest");
         const req = {
             from: buyer.address,
             to: await vesting.getAddress(),
             value: 0n,
             gas: 1_000_000n,
             nonce,
-            deadline: Math.floor(Date.now() / 1000) + 3600,
+            deadline: Number(nowTs0) + 3600,
             data,
         };
 
@@ -210,13 +211,14 @@ describe("vesting.delegate.buy.referral (via ERC-2771 Forwarder.execute)", funct
         {
             const data = vesting.interface.encodeFunctionData("buyBox", [1n, "ABC", pZero]);
             const nonce = await forwarder.nonces(buyer.address);
+            const { timestamp: nowTs0 } = await ethers.provider.getBlock("latest");
             const req = {
                 from: buyer.address,
                 to: await vesting.getAddress(),
                 value: 0n,
                 gas: 1_000_000n,
                 nonce,
-                deadline: Math.floor(Date.now() / 1000) + 3600,
+                deadline: Number(nowTs0) + 3600,
                 data,
             };
             const sig = await signForwardRequest(buyer, forwarder, req);
@@ -229,13 +231,14 @@ describe("vesting.delegate.buy.referral (via ERC-2771 Forwarder.execute)", funct
         {
             const data = vesting.interface.encodeFunctionData("buyBox", [1n, "abcd$#12", pZero]);
             const nonce = await forwarder.nonces(buyer.address);
+            const { timestamp: nowTs0 } = await ethers.provider.getBlock("latest");
             const req = {
                 from: buyer.address,
                 to: await vesting.getAddress(),
                 value: 0n,
                 gas: 1_000_000n,
                 nonce,
-                deadline: Math.floor(Date.now() / 1000) + 3600,
+                deadline: Number(nowTs0) + 3600,
                 data,
             };
             const sig = await signForwardRequest(buyer, forwarder, req);

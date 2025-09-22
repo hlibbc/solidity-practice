@@ -325,6 +325,7 @@ describe('scenario.04 — 02:00 시점 지표 출력', function () {
         vesting = await TV.deploy(
             await forwarder.getAddress(),
             await stableCoin.getAddress(),
+            owner.address,
             VEST_START
         );
         await vesting.waitForDeployment();
@@ -343,7 +344,7 @@ describe('scenario.04 — 02:00 시점 지표 출력', function () {
     // -------------------------------------------------------------------------
     // it 블록들 — 요청된 6개 시각
     // -------------------------------------------------------------------------
-    it('2025-06-03 02:00:00 기준', async function () {
+    it('[ADHOC]: 2025-06-03 02:00:00 기준', async function () {
         const TS = Math.floor(Date.parse('2025-06-03T02:00:00Z') / 1000);
         await backfillHistoryUntil(vesting, TS);
         await printFourMetricsAt(vesting, WALLET_X, TS);
@@ -352,7 +353,7 @@ describe('scenario.04 — 02:00 시점 지표 출력', function () {
         console.log('[TOTAL-BOX-PURCHASED]', (await vesting.getTotalBoxPurchased()).toString());
     });
 
-    it('2025-06-04 02:00:00 기준', async function () {
+    it('[ADHOC]: 2025-06-04 02:00:00 기준', async function () {
         const TS = Math.floor(Date.parse('2025-06-04T02:00:00Z') / 1000);
         await backfillHistoryUntil(vesting, TS);
         await printFourMetricsAt(vesting, WALLET_X, TS);
@@ -361,7 +362,7 @@ describe('scenario.04 — 02:00 시점 지표 출력', function () {
         console.log('[TOTAL-BOX-PURCHASED]', (await vesting.getTotalBoxPurchased()).toString());
     });
 
-    it('2026-06-01 02:00:00 기준', async function () {
+    it('[ADHOC]: 2026-06-01 02:00:00 기준', async function () {
         const A0 = (await ethers.provider.getBlock('latest')).timestamp;
         const CLAIM_TS = Math.floor(Date.parse('2026-05-31T15:43:00Z') / 1000);
         const TARGET_TS = Math.floor(Date.parse('2026-06-01T02:00:00Z') / 1000);
@@ -407,7 +408,7 @@ describe('scenario.04 — 02:00 시점 지표 출력', function () {
         console.log('[TOTAL-BOX-PURCHASED]', (await vesting.getTotalBoxPurchased()).toString());
     });
 
-    it('2027-06-01 02:00:00 기준', async function () {
+    it('[ADHOC]: 2027-06-01 02:00:00 기준', async function () {
         const A0 = (await ethers.provider.getBlock('latest')).timestamp;
         const CLAIM_TS = Math.floor(Date.parse('2026-05-31T15:43:00Z') / 1000);
         const TARGET_TS = Math.floor(Date.parse('2027-06-01T02:00:00Z') / 1000);
@@ -451,7 +452,7 @@ describe('scenario.04 — 02:00 시점 지표 출력', function () {
         console.log('[TOTAL-BOX-PURCHASED]', (await vesting.getTotalBoxPurchased()).toString());
     });
 
-    it('2028-06-01 02:00:00 기준', async function () {
+    it('[ADHOC]: 2028-06-01 02:00:00 기준', async function () {
         const A0 = (await ethers.provider.getBlock('latest')).timestamp;
         const CLAIM_TS = Math.floor(Date.parse('2026-05-31T15:43:00Z') / 1000);
         const TARGET_TS = Math.floor(Date.parse('2028-06-01T02:00:00Z') / 1000);
@@ -495,7 +496,7 @@ describe('scenario.04 — 02:00 시점 지표 출력', function () {
         console.log('[TOTAL-BOX-PURCHASED]', (await vesting.getTotalBoxPurchased()).toString());
     });
 
-    it('2029-06-01 02:00:00 기준', async function () {
+    it('[ADHOC]: 2029-06-01 02:00:00 기준', async function () {
         const A0 = (await ethers.provider.getBlock('latest')).timestamp;
         const CLAIM_TS = Math.floor(Date.parse('2026-05-31T15:43:00Z') / 1000);
         const TARGET_TS = Math.floor(Date.parse('2029-06-01T02:00:00Z') / 1000);

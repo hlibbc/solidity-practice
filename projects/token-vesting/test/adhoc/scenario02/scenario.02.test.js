@@ -306,6 +306,7 @@ describe('scenario.02 — CSV 백필 후 시점별 베스팅 값 확인', functi
         vesting = await TV.deploy(
             await forwarder.getAddress(),
             await stableCoin.getAddress(),
+            owner.address,
             VEST_START
         );
         await vesting.waitForDeployment();
@@ -314,7 +315,7 @@ describe('scenario.02 — CSV 백필 후 시점별 베스팅 값 확인', functi
         await vesting.initializeSchedule(VEST_ENDS, BUYER_TOTALS, REF_TOTALS);
     });
 
-    it('2025-06-03 10:00 기준 누적/최근 하루치 출력', async function () {
+    it('[ADHOC]: 2025-06-03 10:00 기준 누적/최근 하루치 출력', async function () {
 
         const TS_2025_0603_1000 = 1748944800;
 
@@ -365,7 +366,7 @@ describe('scenario.02 — CSV 백필 후 시점별 베스팅 값 확인', functi
 
         await printTotalBoxPurchased(vesting);
     });
-    it('2025-06-04 10:00 기준 누적/최근 하루치 출력', async function () {
+    it('[ADHOC]: 2025-06-04 10:00 기준 누적/최근 하루치 출력', async function () {
         const TS_2025_0604_1000 = 1749031200;
         // 2) CSV: 레퍼럴 선등록 → 구매 백필(bulk)
         const urows = parseUsersCsv();
@@ -414,7 +415,7 @@ describe('scenario.02 — CSV 백필 후 시점별 베스팅 값 확인', functi
 
         await printTotalBoxPurchased(vesting);
     });
-    it('2026-06-01 10:00 기준 가격/베스팅 지표 출력', async function () {
+    it('[ADHOC]: 2026-06-01 10:00 기준 가격/베스팅 지표 출력', async function () {
         // 1) 현재 시각 A에서 한 번 sync
         const A = (await ethers.provider.getBlock('latest')).timestamp;
 
@@ -460,7 +461,7 @@ describe('scenario.02 — CSV 백필 후 시점별 베스팅 값 확인', functi
         await printFourMetricsAt(vesting, WALLET_D, targetTime);
         await printFourMetricsAt(vesting, WALLET_E, targetTime);
     });
-    it('2026-06-02 10:00 기준 가격/베스팅 지표 출력', async function () {
+    it('[ADHOC]: 2026-06-02 10:00 기준 가격/베스팅 지표 출력', async function () {
         // 1) 현재 시각 A에서 한 번 sync
         const A = (await ethers.provider.getBlock('latest')).timestamp;
 
@@ -507,7 +508,7 @@ describe('scenario.02 — CSV 백필 후 시점별 베스팅 값 확인', functi
         await printFourMetricsAt(vesting, WALLET_E, targetTime);
     });
 
-    it('2027-06-02 10:00 기준 가격/베스팅 지표 출력', async function () {
+    it('[ADHOC]: 2027-06-02 10:00 기준 가격/베스팅 지표 출력', async function () {
         // 1) 현재 시각 A에서 한 번 sync
         const A = (await ethers.provider.getBlock('latest')).timestamp;
 

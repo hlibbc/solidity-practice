@@ -33,7 +33,7 @@ describe("TokenVesting ↔ BadgeSBT integration", function () {
 
         // 1) TokenVesting 배포 (forwarder=ZeroAddress, stableCoin=owner 주소 더미)
         const Vesting = await ethers.getContractFactory('TokenVesting');
-        const vesting = await Vesting.deploy(ethers.ZeroAddress, owner.address, owner.address, start);
+        const vesting = await Vesting.deploy(ethers.ZeroAddress, owner.address, start);
         await vesting.waitForDeployment();
 
         // 2) BadgeSBT 배포 (admin=owner)

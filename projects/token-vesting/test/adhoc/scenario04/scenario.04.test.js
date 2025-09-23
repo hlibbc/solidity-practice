@@ -325,7 +325,6 @@ describe('scenario.04 — 02:00 시점 지표 출력', function () {
         vesting = await TV.deploy(
             await forwarder.getAddress(),
             await stableCoin.getAddress(),
-            owner.address,
             VEST_START
         );
         await vesting.waitForDeployment();

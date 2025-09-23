@@ -90,7 +90,6 @@ async function main() {
     const FORWARDER_ENV = process.env.FORWARDER_ADDRESS || ZERO;
     const STABLECOIN_ADDRESS = process.env.STABLECOIN_ADDRESS || ''; // 있으면 재사용
     const VESTING_TOKEN_ADDRESS = process.env.VESTING_TOKEN_ADDRESS || ''; // 선택
-    const VESTING_OWNER_ADDRESS = process.env.VESTING_OWNER_ADDRESS || '';
     const SBT_NAME = process.env.SBT_NAME || 'Badge';
     const SBT_SYMBOL = process.env.SBT_SYMBOL || 'BDG';
 
@@ -161,7 +160,7 @@ async function main() {
         // 3) TokenVesting 배포 (constructor에 forwarder 주소 주입)  ← (2) 요구사항
         console.log('\n3️⃣ TokenVesting 배포 중...');
         const TV = await ethers.getContractFactory('TokenVesting', owner);
-        const vesting = await TV.deploy(fwdAddr, stableAddr, VESTING_OWNER_ADDRESS, START_TS);
+        const vesting = await TV.deploy(fwdAddr, stableAddr, START_TS);
         const depTx3 = vesting.deploymentTransaction();
         await Shared.withGasLog('[deploy] TokenVesting', Promise.resolve(depTx3), totals, 'deploy');
         await vesting.waitForDeployment();

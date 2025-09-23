@@ -376,7 +376,6 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      * @notice TokenVesting 컨트랙트 생성자
      * @param _forwarder 위임대납 forwarder 주소
      * @param _stableCoin 결제/바이백 스테이블코인 주소
-     * @param _owner TokenVesting 컨트랙트의 소유자가 될 주소
      * @param _start 베스팅 시작 자정(UTC) — 예: 2025-06-03 00:00:00
      * @dev 
      * - 스케줄(연차 경계/총량) 초기화는 반드시 별도 함수로 1회 수행해야 함
@@ -385,10 +384,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      */
     constructor(
         address _forwarder, 
-        address _stableCoin, 
-        address _owner,
+        address _stableCoin,
         uint256 _start
-    ) Ownable(_owner) ERC2771Context(_forwarder) {
+    ) Ownable(msg.sender) ERC2771Context(_forwarder) {
         require(_stableCoin != address(0), "invalid StableCoin");
         stableCoin = IERC20(_stableCoin);
 
@@ -843,8 +841,15 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
      */
     function withdrawStableCoinForced(address _to) external onlyOwner nonReentrant {
         require(_to != address(0), "invalid to");
+        require(scheduleInitialized, "no schedule");
+
+        // 스케줄 상 마지막 종료시각( inclusive )을 '지난' 이후에만 허용
+        uint256 lastEnd = poolEndTimes[poolEndTimes.length - 1] + 90 days; // hlibbc: 정책적용
+        require(block.timestamp > lastEnd, "not withdraw yet");
+
         uint256 bal = stableCoin.balanceOf(address(this));
         require(bal > 0, "nothing to withdraw");
+
         require(stableCoin.transfer(_to, bal), "StableCoin xfer failed");
     }
 

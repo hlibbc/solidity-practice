@@ -110,7 +110,6 @@ async function deployFixture() {
     const vesting = await TV.deploy(
         fwdAddr, // forwarder: 메타 트랜잭션용 (현재 미사용)
         await stableCoin.getAddress(), // stableCoin: USDT 컨트랙트 주소
-        owner.address,
         start // start: 베스팅 시작 시각
     );
     await vesting.waitForDeployment();
@@ -244,76 +243,6 @@ async function deployFixture() {
     };
 }
 
-// New: deploy with a custom owner (TokenVesting constructor owner)
-async function deployFixtureWithOwner(newOwnerSigner) {
-    const [oldOwner, buyer, referrer, other, ...rest] = await ethers.getSigners();
-    const desiredOwner = oldOwner; // revert: ignore custom owner, use oldOwner as constructor owner
-
-    const Fwd = await ethers.getContractFactory('WhitelistForwarder', oldOwner);
-    const forwarder = await Fwd.deploy();
-    await forwarder.waitForDeployment();
-
-    const StableCoin = await ethers.getContractFactory("StableCoin", oldOwner);
-    const stableCoin = await StableCoin.deploy();
-
-    const now = BigInt((await ethers.provider.getBlock("latest")).timestamp);
-    const start = now;
-
-    const TV = await ethers.getContractFactory('TokenVesting', oldOwner);
-    const vesting = await TV.deploy(
-        await forwarder.getAddress(),
-        await stableCoin.getAddress(),
-        await newOwnerSigner.getAddress(),
-        start
-    );
-    await vesting.waitForDeployment();
-
-    const BadgeSBT = await ethers.getContractFactory("BadgeSBT", oldOwner);
-    const sbt = await BadgeSBT.deploy(
-        "Badge",
-        "BDG",
-        await vesting.getAddress()
-    );
-    await sbt.waitForDeployment();
-
-    (await vesting.connect(desiredOwner).setBadgeSBT(await sbt.getAddress())).wait();
-    (await sbt.connect(oldOwner).setAdmin(await vesting.getAddress())).wait();
-
-    const ends = [
-        start - 1n + DAY * 365n,
-        start - 1n + DAY * 365n * 2n,
-        start - 1n + DAY * 365n * 3n,
-        start - 1n + DAY * 365n * 4n,
-    ];
-    const buyerTotals = [
-        ethers.parseEther("170000000"),
-        ethers.parseEther("87500000"),
-        ethers.parseEther("52500000"),
-        ethers.parseEther("40000000"),
-    ];
-    const refTotals = [
-        ethers.parseEther("15000000"),
-        ethers.parseEther("15000000"),
-        0n,
-        0n,
-    ];
-    await vesting.connect(desiredOwner).initializeSchedule(ends, buyerTotals, refTotals);
-
-    return {
-        oldOwner,
-        newOwner: desiredOwner,
-        buyer,
-        referrer,
-        other,
-        forwarder,
-        stableCoin,
-        sbt,
-        vesting,
-        start,
-        DAY
-    };
-}
-
 // =============================================================================
 // 모듈 내보내기
 // =============================================================================
@@ -335,4 +264,4 @@ async function deployFixtureWithOwner(newOwnerSigner) {
  *      });
  *  });
  */
-module.exports = { deployFixture, deployFixtureWithOwner };
+module.exports = { deployFixture };

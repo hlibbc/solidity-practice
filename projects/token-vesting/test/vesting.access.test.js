@@ -19,27 +19,9 @@
 
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { deployFixture, deployFixtureWithOwner } = require("./helpers/vestingFixture");
+const { deployFixture } = require("./helpers/vestingFixture");
 
 describe("vesting.access (onlyOwner guard)", function () {
-    it("constructor owner override: oldOwner는 거부되고 newOwner는 통과", async () => {
-        const [, newOwner] = await ethers.getSigners();
-        const { oldOwner, vesting, stableCoin } = await deployFixtureWithOwner(newOwner);
-
-        // console.log(oldOwner.address)
-        // console.log(newOwner.address)
-
-        // oldOwner로 호출 → 거부
-        await expect(
-            vesting.connect(oldOwner).setVestingToken(await stableCoin.getAddress())
-        ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount").withArgs(oldOwner.address);
-
-        // newOwner로 호출 → 통과(정상 실행). 트랜잭션 성공만 확인
-        // await expect(
-        //     vesting.connect(newOwner).setVestingToken(await stableCoin.getAddress())
-        // ).to.not.be.reverted;
-    });
-
     it("initializeSchedule: onlyOwner", async () => {
         const { vesting, buyer, start, DAY } = await deployFixture();
 
@@ -140,5 +122,158 @@ describe("vesting.access (onlyOwner guard)", function () {
             vesting.connect(buyer).syncLimitDay(1)
         ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount")
          .withArgs(buyer.address);
+    });
+});
+
+// -----------------------------------------------------------------------------
+// 소유권 이전 이후 접근 제어 동작 확인
+//  - before에서 기존 owner가 배포한 컨트랙트의 소유권을 newOwner로 이전
+//  - 각 it에서 oldOwner는 실패, newOwner는 성공 동작을 검증
+//  - initializeSchedule은 사전에 실행하지 않고, 필요한 it 내부에서 newOwner로 호출
+// -----------------------------------------------------------------------------
+describe("vesting.access after ownership transfer", function () {
+    let vesting, stableCoin, sbt, start, DAY;
+    let oldOwner, newOwner, buyer, other;
+
+    before(async () => {
+        const fix = await deployFixture();
+        ({ vesting, stableCoin, sbt, start, DAY } = fix);
+        [oldOwner, newOwner, buyer, other] = await ethers.getSigners();
+        // 소유권을 newOwner로 이전
+        await vesting.connect(oldOwner).transferOwnership(await newOwner.getAddress());
+    });
+
+    it("initializeSchedule: oldOwner 실패, newOwner 성공", async () => {
+        // 별도의 배포(스케줄 미초기화 상태)로 검증
+        const [ownerSigner, newOwnerLocal, buyerLocal, otherLocal] = await ethers.getSigners();
+        const Fwd = await ethers.getContractFactory('WhitelistForwarder', ownerSigner);
+        const forwarder2 = await Fwd.deploy();
+        await forwarder2.waitForDeployment();
+
+        const StableCoin = await ethers.getContractFactory('StableCoin', ownerSigner);
+        const stable2 = await StableCoin.deploy();
+        await stable2.waitForDeployment();
+
+        const now2 = BigInt((await ethers.provider.getBlock('latest')).timestamp);
+        const TV = await ethers.getContractFactory('TokenVesting', ownerSigner);
+        const vest2 = await TV.deploy(
+            await forwarder2.getAddress(),
+            await stable2.getAddress(),
+            now2
+        );
+        await vest2.waitForDeployment();
+        await vest2.connect(ownerSigner).transferOwnership(await newOwnerLocal.getAddress());
+
+        const ends = [now2 - 1n + DAY * 10n, now2 - 1n + DAY * 20n];
+        const buyerTotals = [1n, 1n];
+        const refTotals = [1n, 1n];
+
+        await expect(
+            vest2.connect(ownerSigner).initializeSchedule(ends, buyerTotals, refTotals)
+        ).to.be.revertedWithCustomError(vest2, "OwnableUnauthorizedAccount").withArgs(ownerSigner.address);
+
+        await expect(
+            vest2.connect(newOwnerLocal).initializeSchedule(ends, buyerTotals, refTotals)
+        ).to.not.be.reverted;
+    });
+
+    it("setVestingToken: oldOwner 실패, newOwner 성공", async () => {
+        await expect(
+            vesting.connect(oldOwner).setVestingToken(await stableCoin.getAddress())
+        ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount").withArgs(oldOwner.address);
+
+        await expect(
+            vesting.connect(newOwner).setVestingToken(await stableCoin.getAddress())
+        ).to.not.be.reverted;
+    });
+
+    it("setBadgeSBT: oldOwner 실패, newOwner 성공", async () => {
+        await expect(
+            vesting.connect(oldOwner).setBadgeSBT(await stableCoin.getAddress())
+        ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount").withArgs(oldOwner.address);
+
+        await expect(
+            // 유효한 SBT 컨트랙트 주소로 설정 (fixture에서 배포된 sbt)
+            vesting.connect(newOwner).setBadgeSBT(await sbt.getAddress())
+        ).to.not.be.reverted;
+    });
+
+    it("setRecipient: oldOwner 실패, newOwner 성공", async () => {
+        await expect(
+            vesting.connect(oldOwner).setRecipient(await other.getAddress())
+        ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount").withArgs(oldOwner.address);
+
+        await expect(
+            vesting.connect(newOwner).setRecipient(await other.getAddress())
+        ).to.not.be.reverted;
+    });
+
+    it("setReferralCodesBulk: oldOwner 실패, newOwner 성공", async () => {
+        const users = [buyer.address];
+        const codes = ["ABCDEFGH"]; // 8자리 코드
+        const overwrite = true;
+
+        await expect(
+            vesting.connect(oldOwner).setReferralCodesBulk(users, codes, overwrite)
+        ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount").withArgs(oldOwner.address);
+
+        await expect(
+            vesting.connect(newOwner).setReferralCodesBulk(users, codes, overwrite)
+        ).to.not.be.reverted;
+    });
+
+    it("backfillPurchaseBulkAt: oldOwner 실패, newOwner 성공", async () => {
+        const items = [{
+            buyer: buyer.address,
+            refCodeStr: "",
+            boxCount: 1n,
+            purchaseTs: start,
+            paidUnits: 0n,
+        }];
+
+        await expect(
+            vesting.connect(oldOwner).backfillPurchaseBulkAt(items)
+        ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount").withArgs(oldOwner.address);
+
+        const tx = await vesting.connect(newOwner).backfillPurchaseBulkAt(items);
+        await tx.wait();
+    });
+
+    it("backfillSendBoxBulkAt: oldOwner 실패, newOwner 성공(선행 구매 후 전송)", async () => {
+        const purchase = [{
+            buyer: buyer.address,
+            refCodeStr: "",
+            boxCount: 1n,
+            purchaseTs: start,
+            paidUnits: 0n,
+        }];
+        await vesting.connect(newOwner).backfillPurchaseBulkAt(purchase);
+
+        const items = [{
+            from: buyer.address,
+            to: await other.getAddress(),
+            boxCount: 1n,
+            transferTs: start,
+        }];
+
+        await expect(
+            vesting.connect(oldOwner).backfillSendBoxBulkAt(items)
+        ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount").withArgs(oldOwner.address);
+
+        const tx = await vesting.connect(newOwner).backfillSendBoxBulkAt(items);
+        await tx.wait();
+    });
+
+    it("syncLimitDay: oldOwner 실패, newOwner 성공", async () => {
+        // 하루 경과시켜 동기화 대상 생성
+        await ethers.provider.send("evm_increaseTime", [Number(DAY)]);
+        await ethers.provider.send("evm_mine", []);
+        await expect(
+            vesting.connect(oldOwner).syncLimitDay(1)
+        ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount").withArgs(oldOwner.address);
+
+        await expect(
+            vesting.connect(newOwner).syncLimitDay(1)
+        ).to.not.be.reverted;
     });
 });

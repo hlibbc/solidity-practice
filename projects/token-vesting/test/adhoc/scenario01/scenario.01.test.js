@@ -286,7 +286,6 @@ describe('scenario.01 — CSV 백필 후 시점별 베스팅 값 확인', functi
         vesting = await TV.deploy(
             await forwarder.getAddress(),
             await stableCoin.getAddress(),
-            owner.address,
             VEST_START
         );
         await vesting.waitForDeployment();

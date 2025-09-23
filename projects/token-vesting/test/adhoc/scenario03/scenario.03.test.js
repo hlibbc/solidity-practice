@@ -332,7 +332,6 @@ describe('scenario.03 — 01:00/13:00 시점 지표 + 2026-06-01 12:00 클레임
         vesting = await TV.deploy(
             await forwarder.getAddress(),
             await stableCoin.getAddress(),
-            owner.address,
             VEST_START
         );
         await vesting.waitForDeployment();

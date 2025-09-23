@@ -150,7 +150,6 @@ describe("vesting.schedule", function () {
      */
     it("initializeSchedule: 실패 케이스(길이/증가/시작전)", async () => {
         // === 테스트용 계정 및 컨트랙트 준비 ===
-        const [owner] = await ethers.getSigners();
         const StableCoin = await ethers.getContractFactory("StableCoin");
         const stableCoin = await StableCoin.deploy();
 
@@ -160,7 +159,6 @@ describe("vesting.schedule", function () {
         const vesting = await TV.deploy(
             ethers.ZeroAddress, // forwarder: ZeroAddress
             await stableCoin.getAddress(), // stableCoin: StableCoin 컨트랙트 주소
-            owner.address,
             now // start: 현재 블록 타임스탬프
         );
 

@@ -54,7 +54,6 @@ describe("vesting.withdraw", function () {
 
         // 컨트랙트 누적 수령 StableCoin 확인 (totalStableCoinAmount)
         const total0 = await vesting.totalStableCoinAmount();
-        console.log(total0)
         expect(total0).to.be.gt(0n);
 
         // === 즉시 강제 인출은 실패 (대기기간 전)
@@ -76,7 +75,6 @@ describe("vesting.withdraw", function () {
         const to = other.address;
         const vestingAddr = await vesting.getAddress();
         const withdrawable = await stableCoin.balanceOf(vestingAddr);
-        console.log(withdrawable, await stableCoin.balanceOf(vestingAddr))
         expect(withdrawable).to.be.gt(0n);
 
         const balBeforeTo = await stableCoin.balanceOf(to);

@@ -1257,6 +1257,8 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     ) internal {
         require(scheduleInitialized, "no schedule");
         require(block.timestamp >= vestingStartDate, "not started");
+        uint256 lastEnd = poolEndTimes[poolEndTimes.length - 1];
+        require(block.timestamp <= lastEnd, "vesting ended");
         require(_boxCount > 0, "box=0");
 
         address sender = _msgSender();

@@ -1,5 +1,7 @@
 
-require("@nomicfoundation/hardhat-toolbox");
+// require("@nomicfoundation/hardhat-toolbox");
+require("@nomicfoundation/hardhat-ethers");
+require("@nomicfoundation/hardhat-chai-matchers");
 require("dotenv").config({ path: require("path").resolve(__dirname, "../../.env") });
 
 // 필독: 외부 RPC에 연결해서 deploy할 경우, 해당 노드들이 cancun을 지원하지 않을 수 있음

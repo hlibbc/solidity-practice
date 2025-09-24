@@ -1,114 +1,130 @@
 #!/usr/bin/env bash
-
 # =============================================================================
-# ZK-SNARK Circuit Build Script (Commitments/Merkle)
+# ZK-SNARK Circuit Build Script (Commitment / Merkle Inclusion)
 # =============================================================================
-# 이 스크립트는 circom으로 작성된 "커밋먼트/머클" 계열 회로를 빌드하고,
-# Groth16 프로토콜 기반 설정(PTAU), 증명 생성/검증, Solidity 검증자 생성까지 수행합니다.
-#
 # 사용법:
 #   ./scripts/build.sh [circuit]
-# 예시:
-#   ./scripts/build.sh commitment              # circuits/commitment.circom
-#   ./scripts/build.sh merkle                  # circuits/merkle.circom (존재할 경우)
+# 예:
+#   ./scripts/build.sh commitment
+#   ./scripts/build.sh merkle_inclusion
 #
-# 주의:
-# - Phase1/Phase2로 생성되는 PTAU 파일은 한 번 생성 후 여러 회로에서 재사용할 수 있습니다.
-# - inputs/{circuit}.input.json 파일이 있을 경우에만 증명/검증(witness, prove, verify)을 수행합니다.
-# - circomlib 회로를 사용하는 경우 -l 경로를 명시합니다.
+# 산출물 규칙:
+#   build/<circuit>/
+#     - <circuit>.r1cs / .sym
+#     - <circuit>_js/<circuit>.wasm (+ generate_witness.js)
+#     - <circuit>_0000.zkey / <circuit>_final.zkey
+#     - <circuit>.verification_key.json
+#     - <circuit>.wtns / <circuit>.proof.json / <circuit>.public.json
+#   contracts/<PascalCase(circuit)>Verifier.sol
 # =============================================================================
 
-# 에러 즉시 종료, 정의되지 않은 변수 사용 금지, 파이프라인 에러 전파
 set -euo pipefail
 
-# =============================================================================
-# 설정 변수
-# =============================================================================
-# CIRCUIT: 컴파일할 회로 이름 (기본: commitment)
+# -----------------------------------------------------------------------------
+# 기본 설정
+# -----------------------------------------------------------------------------
 CIRCUIT="${1:-commitment}"
-
-# ROOT: 리포지터리 루트(프로젝트 루트)
 ROOT="$(cd "$(dirname "$0")/.."; pwd)"
-
-# BUILD: 회로별 산출물 디렉터리
 BUILD="$ROOT/build/$CIRCUIT"
+WASM_DIR="$BUILD/${CIRCUIT}_js"
+WASM="$WASM_DIR/${CIRCUIT}.wasm"
+WITNESS="$BUILD/${CIRCUIT}.wtns"
+PROOF="$BUILD/${CIRCUIT}.proof.json"
+PUBLIC="$BUILD/${CIRCUIT}.public.json"
+VK="$BUILD/${CIRCUIT}.verification_key.json"
 
-# PTAU: Phase2 준비 완료된 Powers of Tau 파일 경로(재사용 권장)
-PTAU="$ROOT/build/pot/pot12_final.ptau"
+# circomlib include 디렉토리 (프로젝트 의존성에 맞춰 조정 가능)
+CIRCOMLIB_DIR="$ROOT/node_modules/circomlib/circuits"
 
-# 디렉터리 준비
-mkdir -p "$BUILD" "$(dirname "$PTAU")"
+mkdir -p "$BUILD" "$ROOT/contracts"
 
-# =============================================================================
-# Powers of Tau (SRS) 준비
-# =============================================================================
-# - Phase1: 곡선/사이즈를 지정하여 범용 SRS를 생성하고, 임의 기여(contribute)로 랜덤성 추가
-# - Phase2: 특정 회로에 맞도록 SRS 준비 (pot12_final.ptau)
-if [ ! -f "$PTAU" ]; then
-    echo "• Powers of Tau 준비 (phase1 → phase2)"
-    mkdir -p "$(dirname "$PTAU")"
-    # bn128, 2^12 사이즈로 새로운 ptau 생성 (초기 SRS)
-    npx snarkjs powersoftau new bn128 12 "$ROOT/build/pot/pot12_0000.ptau" -v
-    # 첫 번째 기여(랜덤성) — 이름과 엔트로피 문구는 예시용
-    npx snarkjs powersoftau contribute "$ROOT/build/pot/pot12_0000.ptau" "$ROOT/build/pot/pot12_0001.ptau" --name="first" -v -e="random text"
-    # Phase2 준비 (Groth16용 SRS 변환)
-    npx snarkjs powersoftau prepare phase2 "$ROOT/build/pot/pot12_0001.ptau" "$PTAU"
+# -----------------------------------------------------------------------------
+# 1) CIRCUIT 컴파일 (r1cs/wasm/sym)
+# -----------------------------------------------------------------------------
+echo "• circom compile"
+circom "$ROOT/circuits/$CIRCUIT.circom" \
+  --r1cs --wasm --sym \
+  -o "$BUILD" \
+  -l "$CIRCOMLIB_DIR"
+
+# -----------------------------------------------------------------------------
+# 2) R1CS 크기에 맞춘 PTAU 자동 계산/준비
+#    required_power = ceil(log2(constraints*2)), 최소 14 보장
+#    PTAU 파일 경로: build/pot/pot<POWER>_final.ptau
+# -----------------------------------------------------------------------------
+R1CS_INFO="$(pnpm -s dlx snarkjs r1cs info "$BUILD/$CIRCUIT.r1cs" || true)"
+CONSTRAINTS="$(printf '%s\n' "$R1CS_INFO" \
+  | awk '/Constraints/ {for(i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/){print $i; exit}}')"
+if ! [[ "$CONSTRAINTS" =~ ^[0-9]+$ ]]; then
+  echo "⚠️ Could not parse constraints from snarkjs output. Falling back to 6000."
+  CONSTRAINTS=6000
+fi
+REQ=$(( CONSTRAINTS * 2 ))
+
+# ceil(log2(REQ)) 계산 (정수 비트 시프트; macOS bash 3.2 호환)
+needed_power=0
+tmp=$(( REQ - 1 ))
+while [ $tmp -gt 0 ]; do
+  tmp=$(( tmp >> 1 ))
+  needed_power=$(( needed_power + 1 ))
+done
+# 안전마진: 최소 14
+if [ $needed_power -lt 14 ]; then needed_power=14; fi
+
+PTAU="$ROOT/build/pot/pot${needed_power}_final.ptau"
+mkdir -p "$(dirname "$PTAU")"
+
+# 현재 PTAU의 power 읽기 (있으면)
+have_power=""
+if [ -f "$PTAU" ]; then
+  have_power=$(pnpm -s dlx snarkjs powersoftau verify "$PTAU" 2>/dev/null | awk '/power:/ {print $2; exit}')
 fi
 
+echo "• circuit constraints: $CONSTRAINTS  → required power: $needed_power"
+echo "• using PTAU: $PTAU"
+if [ -n "$have_power" ]; then
+  echo "  detected PTAU power: $have_power"
+fi
 
-# =============================================================================
-# 회로 컴파일 (circom)
-# =============================================================================
-echo "• circom compile"
-# 산출물:
-# - ${CIRCUIT}.r1cs : 수학적 제약식(R1CS) 설계도
-# - ${CIRCUIT}.wasm : witness 계산용 WASM
-# - ${CIRCUIT}.sym  : 디버깅용 심볼 테이블
-circom "$ROOT/circuits/$CIRCUIT.circom" \
-    --r1cs --wasm --sym -o "$BUILD" \
-    -l "$ROOT/node_modules/circomlib/circuits"
+# 없거나 파워가 부족하면 새로 생성 (로컬 생성 방식)
+if [ ! -f "$PTAU" ] || [ -z "$have_power" ] || [ "$have_power" -lt "$needed_power" ]; then
+  echo "• (re)creating PTAU (power=$needed_power)"
+  pnpm -s dlx snarkjs powersoftau new bn128 $needed_power "$ROOT/build/pot/pot${needed_power}_0000.ptau" -v
+  pnpm -s dlx snarkjs powersoftau contribute "$ROOT/build/pot/pot${needed_power}_0000.ptau" \
+                                            "$ROOT/build/pot/pot${needed_power}_0001.ptau" --name="first" -v -e="random text"
+  pnpm -s dlx snarkjs powersoftau prepare phase2 "$ROOT/build/pot/pot${needed_power}_0001.ptau" "$PTAU"
+fi
 
-# =============================================================================
-# Groth16 설정 (회로 전용 proving/verification key 생성)
-# =============================================================================
+# -----------------------------------------------------------------------------
+# 3) Groth16 setup (zkey 생성) + 검증키 export
+# -----------------------------------------------------------------------------
 echo "• groth16 setup"
-# R1CS + Phase2-PTAU → 첫 zkey 생성 (회로 전용 키 번들)
-npx snarkjs groth16 setup "$BUILD/$CIRCUIT.r1cs" "$PTAU" "$BUILD/${CIRCUIT}_0000.zkey"
-# zkey에 추가 기여(랜덤성) 후 최종 zkey 확정
-npx snarkjs zkey contribute "$BUILD/${CIRCUIT}_0000.zkey" "$BUILD/${CIRCUIT}_final.zkey" --name="1st" -e="another text"
+pnpm -s dlx snarkjs groth16 setup "$BUILD/$CIRCUIT.r1cs" "$PTAU" "$BUILD/${CIRCUIT}_0000.zkey"
+pnpm -s dlx snarkjs zkey contribute "$BUILD/${CIRCUIT}_0000.zkey" "$BUILD/${CIRCUIT}_final.zkey" --name="1st" -e="another text"
 
-# =============================================================================
-# Verification Key 추출 (검증에 필요한 공개키)
-# =============================================================================
 echo "• export verification key"
-npx snarkjs zkey export verificationkey "$BUILD/${CIRCUIT}_final.zkey" "$BUILD/verification_key.json"
+pnpm -s dlx snarkjs zkey export verificationkey "$BUILD/${CIRCUIT}_final.zkey" "$VK"
 
-# =============================================================================
-# 입력 존재 시: witness 계산 → 증명 생성 → 검증
-# =============================================================================
-# 입력 파일 경로 규칙: inputs/{circuit}.input.json
+# -----------------------------------------------------------------------------
+# 4) 입력 있으면 witness/증명/검증 수행
+#    입력 경로 규칙: inputs/<circuit>.input.json
+# -----------------------------------------------------------------------------
 INPUT="$ROOT/inputs/$CIRCUIT.input.json"
 if [ -f "$INPUT" ]; then
-    echo "• witness / proof / verify"
-    # WASM 실행으로 witness(wtns) 생성
-    node "$BUILD/${CIRCUIT}_js/generate_witness.js" \
-        "$BUILD/${CIRCUIT}_js/${CIRCUIT}.wasm" "$INPUT" "$BUILD/witness.wtns"
+  echo "• witness / prove / verify"
+  node "$WASM_DIR/generate_witness.js" "$WASM" "$INPUT" "$WITNESS"
 
-    # 증명(proof.json)과 공개 입력(public.json) 생성
-    npx snarkjs groth16 prove "$BUILD/${CIRCUIT}_final.zkey" "$BUILD/witness.wtns" \
-        "$BUILD/proof.json" "$BUILD/public.json"
-
-    # 검증 (verification key + 공개 입력 + 증명)
-    npx snarkjs groth16 verify "$BUILD/verification_key.json" "$BUILD/public.json" "$BUILD/proof.json"
+  pnpm -s dlx snarkjs groth16 prove "$BUILD/${CIRCUIT}_final.zkey" "$WITNESS" "$PROOF" "$PUBLIC"
+  pnpm -s dlx snarkjs groth16 verify "$VK" "$PUBLIC" "$PROOF"
 else
-    echo "• skip prove/verify (no input: $INPUT)"
+  echo "• skip prove/verify (no input: $INPUT)"
 fi
 
-# =============================================================================
-# Solidity 검증자 컨트랙트 생성 (온체인 검증용)
-# =============================================================================
+# -----------------------------------------------------------------------------
+# 5) Solidity Verifier 생성 (PascalCase)
+# -----------------------------------------------------------------------------
 echo "• export solidity verifier"
-npx snarkjs zkey export solidityverifier "$BUILD/${CIRCUIT}_final.zkey" "$ROOT/contracts/${CIRCUIT^}Verifier.sol"
-
+PascalCircuit="$(echo "$CIRCUIT" | awk -F'[_-]' '{s=""; for(i=1;i<=NF;i++){s=s toupper(substr($i,1,1)) substr($i,2)}; print s}')"
+pnpm -s dlx snarkjs zkey export solidityverifier "$BUILD/${CIRCUIT}_final.zkey" "$ROOT/contracts/${PascalCircuit}Verifier.sol"
 
 echo "✅ done: $CIRCUIT"

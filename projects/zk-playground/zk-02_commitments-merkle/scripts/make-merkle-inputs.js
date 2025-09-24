@@ -1,5 +1,5 @@
-// scripts/make-merkle-inputs.js  (CJS, fast + with logs)
-// 요구: poseidon-lite >= 0.3.x
+// scripts/make-merkle-inputs.js  (CJS, fast + with logs, 4-space indent)
+// 요구: poseidon-lite >= 0.3.x  (poseidon2 사용)
 //
 // 사용 예시 1) 리프 직접 지정
 //   node scripts/make-merkle-inputs.js --depth 20 --leaves 11,22,33,44 --index 2
@@ -15,7 +15,7 @@ const { poseidon2 } = require("poseidon-lite");
 
 function parseCLI() {
     const args = process.argv.slice(2);
-    const opts = { depth: 20, verbose: true };
+    const opts = { depth: 20, verbose: true, check: true };
     for (let i = 0; i < args.length; i++) {
         const a = args[i];
         const next = args[i + 1];
@@ -27,11 +27,14 @@ function parseCLI() {
         if (a === "--pos") opts.pos = parseInt(next, 10);
         if (a === "--others") opts.others = (next || "").split(",").filter(Boolean);
         if (a === "--quiet") opts.verbose = false;
+        if (a === "--no-check") opts.check = false;
     }
     return opts;
 }
 
-function assert(cond, msg) { if (!cond) throw new Error(msg); }
+function assert(cond, msg) {
+    if (!cond) throw new Error(msg);
+}
 
 function ceilLog2(n) {
     let d = 0, m = 1;
@@ -49,11 +52,27 @@ function buildZeroHashes(maxDepth) {
     return zs;
 }
 
+// pathElements/Indices를 이용해 leaf → root 재계산 (회로와 동일한 규칙: 0=left, 1=right)
+function reconstructRootFromPath(leaf, pathElements, pathIndices) {
+    let cur = BigInt(leaf);
+    for (let i = 0; i < pathElements.length; i++) {
+        const sib = BigInt(pathElements[i]);
+        const isRight = pathIndices[i] === 1 || pathIndices[i] === "1";
+        const left = isRight ? sib : cur;
+        const right = isRight ? cur : sib;
+        cur = poseidon2([left, right]);
+    }
+    return cur;
+}
+
 (function main() {
     const t0 = Date.now();
     try {
-        const { leaves, index, depth, secret, salt, pos = 0, others, verbose } = parseCLI();
-        if (verbose) console.log("▶ start make-merkle-inputs:", { depth, hasLeaves: !!leaves?.length, hasSecretSalt: secret !== undefined });
+        const { leaves, index, depth, secret, salt, pos = 0, others, verbose, check } = parseCLI();
+        if (verbose) {
+            console.log("▶ start make-merkle-inputs");
+            console.log("  • params:", { depth, hasLeaves: !!leaves?.length, hasSecretSalt: secret !== undefined, pos });
+        }
 
         // 1) 리프 준비
         let leafValues = [];
@@ -79,7 +98,7 @@ function buildZeroHashes(maxDepth) {
 
         if (verbose) {
             console.log(`  • leaves count: ${leafValues.length}`);
-            console.log(`  • target index: ${targetIndex}`);
+            console.log(`  • target index: ${targetIndex} (index ${index === undefined ? "(auto from --pos)" : "(explicit)"} )`);
         }
 
         // 2) 최소 깊이로 트리 구성 (2^depth0 >= #leaves)
@@ -106,6 +125,7 @@ function buildZeroHashes(maxDepth) {
         if (verbose) console.log(`  ✓ built minimal tree in ${buildMs} ms`);
 
         // 3) zero hashes 준비 (전체 depth까지)
+        assert(depth >= depth0, `--depth(${depth}) must be >= minimal depth(${depth0}) for ${leafValues.length} leaves`);
         const zs = buildZeroHashes(depth);
         if (verbose) console.log(`  • precomputed zero hashes up to depth=${depth}`);
 
@@ -145,10 +165,19 @@ function buildZeroHashes(maxDepth) {
         const out = {
             leaf: levels[0][targetIndex].toString(),
             pathElements: siblings,     // length == depth
-            pathIndices: indexBits,     // length == depth
+            pathIndices: indexBits,     // length == depth (0=left, 1=right)
             root: fullRoot.toString()
         };
 
+        // 7) (옵션) 경로 검증
+        if (check) {
+            const recon = reconstructRootFromPath(out.leaf, out.pathElements, out.pathIndices);
+            assert(recon === BigInt(out.root),
+                `reconstructed root mismatch!\n  got:  ${recon}\n  exp:  ${out.root}`);
+            if (verbose) console.log("  ✓ path self-check passed (leaf → root reconstruction OK)");
+        }
+
+        // 8) 파일 저장
         const ROOT = path.resolve(__dirname, "..");
         const outDir = path.join(ROOT, "inputs");
         const outPath = path.join(outDir, "merkle_inclusion.input.json");

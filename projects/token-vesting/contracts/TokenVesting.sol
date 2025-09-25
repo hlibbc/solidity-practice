@@ -29,6 +29,10 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     using Math for uint256;
     using Address for address;
 
+    /// def. error
+    error InsufficientAfterPriorTransfers();
+    error StableCoinTransferFailed();
+
     /// def. struct
     /**
      * @notice 날짜별 적용될, 박스 누적 보유수량 체크포인트
@@ -94,7 +98,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     uint256 private constant SECONDS_PER_DAY = 86400; // 1일 (86400초) - UTC 자정 기준 계산용
     uint256 private constant MAX_BACKFILL_BULK = 10; // bulk 처리 10개
     uint256 private constant UNSET = type(uint256).max; // "클레임 이력없음" 표식을 위한 센티널 값
-    IBadgeSBT.BurnAuth private constant SBT_BURNAUTH = IBadgeSBT.BurnAuth.Neither;
+    IERC5484.BurnAuth private constant SBT_BURNAUTH = IERC5484.BurnAuth.Neither;
 
     /// def. immutable
     IERC20  public immutable stableCoin; // 박스구매 결제용 스테이블코인
@@ -506,7 +510,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     ) public onlyOwner {
         bytes8  code = _normalizeToBytes8(_refCodeStr);
         require(codeToOwner[code] != address(0), "Referral is not exist");
-        require(_discountRate <= 100, "discount rate: out of range");
+        require(_discountRate <= 100, "out of range");
         refDiscountOf[code] = _discountRate;
         emit ReferralDiscountSet(codeToOwner[code], code, _discountRate);
     }
@@ -608,7 +612,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
             if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
                 base = sHist[sHist.length - 1].amount;
             }
-            require(base >= t.boxCount, "insufficient after prior transfers");
+            if (base < t.boxCount) {
+                revert InsufficientAfterPriorTransfers();
+            }
 
             uint256 newFromBal = base - t.boxCount;
 
@@ -629,6 +635,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
 
             // 수령자 레퍼럴 코드 보장(선택)
             _ensureReferralCode(t.to);
+
+            uint256 sbtIdTo = _ensureSbt(t.to);
+            _upgradeBadgeIfNeeded(t.to, sbtIdTo);
 
             emit BoxesTransferred(t.from, t.to, t.boxCount, uint64(t.transferTs));
 
@@ -689,7 +698,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
             base = sHist[sHist.length - 1].amount;
         }
-        require(base >= _boxCount, "insufficient after prior sends");
+        if (base < _boxCount) {
+            revert InsufficientAfterPriorTransfers();
+        }
 
         uint256 newFromBal = base - _boxCount;
         if (sHist.length == 0 && lastBuyerClaimedDay[sender] == 0) {
@@ -706,6 +717,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         _pushBuyerCheckpoint(_to, effDay, _boxCount);
         // 수령자 레퍼럴 코드 보장(선택)
         _ensureReferralCode(_to);
+
+        uint256 sbtIdTo = _ensureSbt(_to);
+        _upgradeBadgeIfNeeded(_to, sbtIdTo);
 
         emit BoxesTransferred(sender, _to, _boxCount, (uint64)(block.timestamp));
     }
@@ -787,7 +801,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         uint256 amount = buybackStableCoinAmount[sender];
         require(amount > 0, "nothing");
         buybackStableCoinAmount[sender] = 0;
-        require(stableCoin.transfer(sender, amount), "StableCoin xfer failed");
+        if(!stableCoin.transfer(sender, amount)) {
+            revert StableCoinTransferFailed();
+        }
         emit BuybackClaimed(sender, amount);
     }
 
@@ -850,7 +866,9 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         uint256 bal = stableCoin.balanceOf(address(this));
         require(bal > 0, "nothing to withdraw");
 
-        require(stableCoin.transfer(_to, bal), "StableCoin xfer failed");
+        if(!stableCoin.transfer(_to, bal)) {
+            revert StableCoinTransferFailed();
+        }
     }
 
     /**
@@ -1277,13 +1295,17 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
                 _p.value, _p.deadline, _p.v, _p.r, _p.s
             );
         }
-        require(stableCoin.transferFrom(sender, address(this), estimatedPrice), "StableCoin xfer failed");
+        if(!stableCoin.transferFrom(sender, address(this), estimatedPrice)) {
+            revert StableCoinTransferFailed();
+        }
 
         // BUYBACK_PERCENT에 해당하는 금액만 남기고 나머지는 Recipient에게 전송
         uint256 buyback = (estimatedPrice * BUYBACK_PERCENT) / 100;
         buybackStableCoinAmount[referrer] += buyback; // 바이백 받을 양 기록
         require(recipient != address(0), "recipient not set");
-        require(stableCoin.transfer(recipient, (estimatedPrice - buyback)), "StableCoin xfer failed");
+        if(!stableCoin.transfer(recipient, (estimatedPrice - buyback))) {
+            revert StableCoinTransferFailed();
+        }
 
         uint256 dToday = (block.timestamp - vestingStartDate) / SECONDS_PER_DAY;
         boxesAddedPerDay[dToday]     += _boxCount;

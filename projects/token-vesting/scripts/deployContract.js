@@ -157,6 +157,30 @@ async function main() {
         console.log('✅ BadgeSBT 배포 완료:', sbtAddr);
         await waitIfNeeded();
 
+        // 2.1) BadgeSbtTierUriResolver 배포
+        console.log('\n2.1️⃣ BadgeSbtTierUriResolver 배포 중...');
+        const Resolver = await ethers.getContractFactory('BadgeSbtTierUriResolver', owner);
+        // constructor(address sbt) — Ownable(msg.sender)로 초기화됨
+        const resolver = await Resolver.deploy(sbtAddr);
+        const depTx2r = resolver.deploymentTransaction();
+        await Shared.withGasLog('[deploy] BadgeSbtTierUriResolver', Promise.resolve(depTx2r), totals, 'deploy');
+        await resolver.waitForDeployment();
+        const resolverAddr = await resolver.getAddress();
+        console.log('✅ BadgeSbtTierUriResolver 배포 완료:', resolverAddr);
+        await waitIfNeeded();
+
+        // 2.2) BadgeSBT ← Resolver 연결
+        console.log('\n2.2️⃣ BadgeSBT.setResolver(...) 실행...');
+        await Shared.withGasLog(
+        '[setup] sbt.setResolver(resolver)',
+        sbt.setResolver(resolverAddr),
+        totals,
+        'setup'
+        );
+        console.log('   • sbt.setResolver 완료');
+        await waitIfNeeded();
+
+
         // 3) TokenVesting 배포 (constructor에 forwarder 주소 주입)  ← (2) 요구사항
         console.log('\n3️⃣ TokenVesting 배포 중...');
         const TV = await ethers.getContractFactory('TokenVesting', owner);
@@ -248,6 +272,7 @@ async function main() {
             contracts: {
                 stableCoin: stableAddr,
                 badgeSBT: sbtAddr,
+                badgeSbtResolver: resolverAddr,
                 tokenVesting: vestingAddr,
                 vestingToken: VESTING_TOKEN_ADDRESS || null,
                 // permitAndBuyWrapper: wrapperAddr,

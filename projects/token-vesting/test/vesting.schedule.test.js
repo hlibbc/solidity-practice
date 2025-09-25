@@ -152,6 +152,7 @@ describe("vesting.schedule", function () {
         // === 테스트용 계정 및 컨트랙트 준비 ===
         const StableCoin = await ethers.getContractFactory("StableCoin");
         const stableCoin = await StableCoin.deploy();
+        await stableCoin.waitForDeployment();
 
         // === TokenVesting 배포 (새 생성자: forwarder, stableCoin, start) ===
         const now = BigInt((await ethers.provider.getBlock("latest")).timestamp);
@@ -161,10 +162,19 @@ describe("vesting.schedule", function () {
             await stableCoin.getAddress(), // stableCoin: StableCoin 컨트랙트 주소
             now // start: 현재 블록 타임스탬프
         );
+        await vesting.waitForDeployment();
 
         // === BadgeSBT 배포: admin = vesting (mint/upgrade가 onlyAdmin이므로) ===
-        const BadgeSBT = await ethers.getContractFactory("BadgeSBT");
+        const BadgeSBT = await ethers.getContractFactory('BadgeSBT');
         const sbt = await BadgeSBT.deploy("Badge", "BDG", await vesting.getAddress());
+        await sbt.waitForDeployment();
+        let sbtAddr = await sbt.getAddress();
+
+        const Resolver = await ethers.getContractFactory('BadgeSbtTierUriResolver');
+        const resolver = await Resolver.deploy(sbtAddr);
+        await resolver.waitForDeployment();
+        let resolverAddr = await resolver.getAddress();
+        await sbt.setResolver(resolverAddr);
 
         // === TokenVesting에 SBT 주소 연결 ===
         await vesting.setBadgeSBT(await sbt.getAddress());

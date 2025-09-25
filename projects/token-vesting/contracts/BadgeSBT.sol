@@ -1,97 +1,128 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/interfaces/IERC4906.sol";
+import "./interface/IBadgeSBT.sol";
 import "./interface/IERC5192.sol";
 import "./interface/IERC5484.sol";
 
+interface ITokenUriResolverView {
+    function tokenURI(uint256 tokenId) external view returns (string memory);
+}
+
 /**
- * @title BadgeSBT - 등급 기반 Soulbound Token
+ * @title BadgeSBT - 등급 기반 소울바운드 토큰
  * @notice 
- * - 비양도(transfer 불가), 민트/번만 허용하는 Soulbound Token
- * - 구매량에 따른 등급 시스템 (Sprout → Cloud → Airplane → Rocket → SpaceStation → Moon)
- * - EIP-5192: locked(tokenId)=true, mint 시 Locked 이벤트 발생
- * - EIP-5484: Issued 이벤트 & 토큰별 BurnAuth 고정
- * - 등급별 메타데이터 URI 자동 업데이트
- * @dev OpenZeppelin Contracts v5.x 기반
+ *  - 전송/승인 불가(SBT), 발급/소각만 허용
+ *  - 등급(IBadgeSBT.Tier)에 따라 외부 Resolver가 tokenURI 제공
+ *  - 관리자(admin)가 민트/업그레이드 수행, 소유자(owner)는 admin/resolver 관리
+ * @dev 
+ *  - EIP-5192 잠금, EIP-5484 발행/소각 규칙, ERC-4906 메타데이터 갱신 지원
+ *  - 등급은 항상 비감소(다운그레이드 금지)
+ *  - tokenURI는 Resolver 필수 설정, 미설정 시 revert
  */
-contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
-    // def. Error
+contract BadgeSBT is ERC721, IERC5192, IERC5484, Ownable, IBadgeSBT {
+    // ---------------- Errors ----------------
     error SBT_TransferNotAllowed();
     error SBT_ApprovalNotAllowed();
     error SBT_BurnNotAuthorized();
     error NotAdmin(address caller);
     error InvalidTier();
+    error ResolverNotSet();
 
-    // def. enum
+    // ---------------- Thresholds (누적 박스 수 기준) ----------------
     /**
-     * @notice SBT 등급 정의 열거형 상수
-     * @dev
-     * - Sprout: 1 ~ 4
-     * - Cloud: 5 ~ 9
-     * - Airplane: 10 ~ 19
-     * - Rocket: 20 ~ 49
-     * - SpaceStation: 50 ~ 99
-     * - Moon: 100 ~
+     * @notice 등급 경계값(누적 박스 수)
+     * @dev 아래 표는 _tierFromCount에서 사용
+     *  - 0..4      → Sprout (기본)
+     *  - 5..9      → Cloud
+     *  - 10..19    → Airplane
+     *  - 20..49    → Rocket
+     *  - 50..99    → SpaceStation
+     *  - 100+      → Moon
      */
-    enum Tier { 
-        None, 
-        Sprout,
-        Cloud,
-        Airplane, 
-        Rocket, 
-        SpaceStation, 
-        Moon
-    }
+    uint256 private constant TIER_SPROUT_MAX    = 5;    // 0..4 → Sprout, 5..9 → Cloud ...
+    uint256 private constant TIER_CLOUD_MAX     = 10;
+    uint256 private constant TIER_AIRPLANE_MAX  = 20;
+    uint256 private constant TIER_ROCKET_MAX    = 50;
+    uint256 private constant TIER_SSTATION_MAX  = 100;
 
-    // 등급 기준(개수)
-    uint256 private constant TIER_SPROUT_MAX  = 5; 
-    uint256 private constant TIER_CLOUD_MAX  = 10; 
-    uint256 private constant TIER_AIRPLANE_MAX  = 20; 
-    uint256 private constant TIER_ROCKET_MAX  = 50; 
-    uint256 private constant TIER_SSTATION_MAX  = 100; 
+    // ---------------- Events ----------------
+    /**
+     * @notice SBT의 등급이 상승했을 때 발생
+     * @param tokenId 대상 토큰 ID
+     * @param from    이전 등급
+     * @param to      신규 등급
+     */
+    event BadgeUpgraded(uint256 indexed tokenId, IBadgeSBT.Tier from, IBadgeSBT.Tier to);
 
-    // 등급별 메타데이터 URI
-    string private constant URI_SPROUT = "ipfs://.../sprout.json";
-    string private constant URI_CLOUD = "ipfs://.../cloud.json";
-    string private constant URI_AIRPLANE = "ipfs://.../airplane.json";
-    string private constant URI_ROCKET = "ipfs://.../rocket.json";
-    string private constant URI_SPACESTATION = "ipfs://.../sstation.json";
-    string private constant URI_MOON = "ipfs://.../moon.json";
+    /**
+     * @notice Resolver 주소가 교체되었을 때 발생
+     * @param prev 이전 Resolver 주소
+     * @param next 신규 Resolver 주소
+     */
+    event ResolverChanged(address indexed prev, address indexed next);
 
-    // 이벤트(선택) — 업그레이드 추적용
-    event BadgeUpgraded(uint256 indexed tokenId, Tier from, Tier to, string uri);
-
-    // ===== State =====
+    // ---------------- State ----------------
+    /**
+     * @notice 다음 발급될 토큰 ID(1부터 시작)
+     */
     uint256 private _nextId = 1;
+
+    /**
+     * @notice 운영 관리자 주소(민트/업그레이드 권한)
+     */
     address public admin;
 
-    // EIP-5192: 잠금 상태(본 구현은 true 고정)
-    mapping(uint256 => bool) private _locked;
+    /**
+     * @notice 총 발행량(현재 존재하는 SBT 총 개수)
+     * @dev 민트 시 +1, 소각 시 -1
+     */
+    uint256 private _totalSupply;
 
-    // EIP-5484: 소각 권한, 발행자
-    mapping(uint256 => BurnAuth) private _burnAuth;
+    // Soulbound + 5484
+    /**
+     * @notice EIP-5192: 토큰 락 여부
+     */
+    mapping(uint256 => bool) private _locked;               // EIP-5192
+    /**
+     * @notice EIP-5484: 소각 권한 정책
+     */
+    mapping(uint256 => BurnAuth) private _burnAuth;         // EIP-5484
+    /**
+     * @notice EIP-5484: 발행자 주소 기록
+     */
     mapping(uint256 => address)  private _issuer;
 
-    // 토큰별 현재 등급(다운그레이드 방지 목적)
-    mapping(uint256 => Tier)     private _tierOf;
+    // 현재 등급
+    /**
+     * @notice 현재 등급 기록
+     */
+    mapping(uint256 => IBadgeSBT.Tier) private _tierOf;
 
-    // ===== Modifiers =====
+    // 외부 URI Resolver (tokenURI(uint256) 보유)
+    /**
+     * @notice 외부 tokenURI 리졸버(등급→URI 매핑 제공)
+     */
+    ITokenUriResolverView private _resolver;
+
+    // ---------------- Modifiers ----------------
+    /**
+     * @notice admin 전용 제어자(민트/업그레이드)
+     */
     modifier onlyAdmin() {
         if (admin != msg.sender) revert NotAdmin(msg.sender);
         _;
     }
 
+    // ---------------- Constructor ----------------
     /**
-     * @notice BadgeSBT 컨트랙트 생성자
-     * @param _name 토큰 이름
-     * @param _symbol 토큰 심볼
-     * @param _admin 등급 업그레이드 권한을 가진 관리자 주소
-     * @dev 
-     * - ERC721과 Ownable 초기화
-     * - admin은 등급 업그레이드와 민트 권한을 가짐
+     * @notice 생성자
+     * @param _name 토큰 이름(ERC721)
+     * @param _symbol 토큰 심볼(ERC721)
+     * @param _admin 초기 admin 주소(민트/업그레이드 권한 보유)
      */
     constructor(string memory _name, string memory _symbol, address _admin)
         ERC721(_name, _symbol)
@@ -100,13 +131,11 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
         admin = _admin;
     }
 
+    // ---------------- Admin / Owner controls ----------------
+
     /**
-     * @notice 관리자 주소 변경 - onlyOwner 전용
-     * @param _candidate 새로운 관리자 후보 주소
-     * @dev 
-     * - 컨트랙트 소유자만 호출 가능
-     * - 0 주소는 허용하지 않음
-     * - 등급 업그레이드와 민트 권한이 이전됨
+     * @notice admin 지정을 변경 (onlyOwner)
+     * @param _candidate 새 admin 주소 (zero 금지)
      */
     function setAdmin(address _candidate) external onlyOwner {
         require(_candidate != address(0), "Invalid args!");
@@ -114,15 +143,36 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
     }
 
     /**
-     * @notice SBT 발행(민트) - admin 전용, 이후 전송 불가
-     * @param to 토큰 수취자 주소
-     * @param auth 소각 권한 설정 (EIP-5484)
-     * @return tokenId 발행된 토큰의 ID
-     * @dev 
-     * - onlyAdmin만 호출 가능
-     * - 토큰은 영구 잠금 상태로 설정
-     * - 초기 등급은 Tier.None으로 설정
-     * - EIP-5192와 EIP-5484 이벤트 발생
+     * @notice Resolver 교체 (onlyOwner)
+     * @dev    교체 즉시 ERC-4906 이벤트로 전체 메타데이터 갱신 신호 전파
+     * @param newResolver 새 Resolver 컨트랙트 주소
+     */
+    function setResolver(address newResolver) external onlyOwner {
+        address prev = address(_resolver);
+        _resolver = ITokenUriResolverView(newResolver);
+        emit ResolverChanged(prev, newResolver);
+
+        if (_nextId > 1) {
+            // 1..(마지막 발급된 토큰ID) 범위 갱신 알림
+            emit IERC4906.BatchMetadataUpdate(1, _nextId - 1);
+        }
+    }
+
+    /**
+     * @notice 현재 설정된 Resolver 주소 조회
+     * @return 현재 설정된 Resolver 컨트랙트 주소
+     */
+    function resolver() external view returns (address) {
+        return address(_resolver);
+    }
+
+    // ---------------- IBadgeSBT: Mint / Upgrade / Query ----------------
+
+    /**
+     * @notice SBT 발행(민트) - admin 전용
+     * @param to 수령자 주소
+     * @param auth EIP-5484 BurnAuth 정책
+     * @return tokenId 새로 발급된 토큰 ID
      */
     function mint(address to, BurnAuth auth)
         external
@@ -131,26 +181,60 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
     {
         tokenId = _nextId++;
         _safeMint(to, tokenId);
-        _setTokenURI(tokenId, URI_SPROUT);
 
         _locked[tokenId]    = true;
         _burnAuth[tokenId]  = auth;
         _issuer[tokenId]    = _msgSender();
-        _tierOf[tokenId]    = Tier.Sprout; // 초기 등급(없음)
+        _tierOf[tokenId]    = IBadgeSBT.Tier.Sprout;
 
-        emit Locked(tokenId); // EIP-5192
+        unchecked { _totalSupply += 1; }
+
+        emit Locked(tokenId);                             // EIP-5192
         emit Issued(_issuer[tokenId], to, tokenId, auth); // EIP-5484
+        emit IERC4906.MetadataUpdate(tokenId);            // 표시 메타데이터 갱신 통지
     }
 
     /**
-     * @notice SBT 소각 - BurnAuth 규칙에 따른 권한 검증
-     * @param tokenId 소각할 토큰의 ID
-     * @dev 
-     * - EIP-5484의 BurnAuth 규칙을 엄격히 적용
-     * - IssuerOnly: 발행자만 소각 가능
-     * - OwnerOnly: 소유자만 소각 가능
-     * - Both: 발행자와 소유자 모두 소각 가능
-     * - Neither: 아무도 소각 불가
+     * @notice 누적 구매 박스 수에 근거한 자동 등급 업그레이드
+     * @param tokenId 대상 토큰
+     * @param totalBoxesPurchased 누적 구매 박스 수
+     */
+    function upgradeBadgeByCount(uint256 tokenId, uint256 totalBoxesPurchased) external onlyAdmin {
+        _requireOwned(tokenId);
+        IBadgeSBT.Tier newTier = _tierFromCount(totalBoxesPurchased);
+        _upgradeBadge(tokenId, newTier);
+    }
+
+    /**
+     * @notice 수동 등급 업그레이드(admin 권한)
+     * @dev    등급 다운그레이드는 금지
+     * @param tokenId 대상 토큰 ID
+     * @param newTier 설정할 신규 등급
+     */
+    function upgradeBadge(uint256 tokenId, IBadgeSBT.Tier newTier) external onlyAdmin {
+        _requireOwned(tokenId);
+        if (newTier == IBadgeSBT.Tier.None || uint8(newTier) > uint8(IBadgeSBT.Tier.Moon)) {
+            revert InvalidTier();
+        }
+        _upgradeBadge(tokenId, newTier);
+    }
+
+    /**
+     * @notice 현재 등급 조회
+     * @param tokenId 조회할 토큰 ID
+     * @return 현재 등급(IBadgeSBT.Tier)
+     */
+    function currentTier(uint256 tokenId) external view returns (IBadgeSBT.Tier) {
+        _requireOwned(tokenId);
+        return _tierOf[tokenId];
+    }
+
+    // ---------------- Burn (EIP-5484 규칙) ----------------
+
+    /**
+     * @notice 소각(EIP-5484 규칙 준수)
+     * @dev    BurnAuth 정책에 맞는 주체만 소각 가능
+     * @param tokenId 소각할 토큰 ID
      */
     function burn(uint256 tokenId) external {
         address owner_ = ownerOf(tokenId);
@@ -168,15 +252,16 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
         }
 
         _burn(tokenId);
+
+        unchecked { _totalSupply -= 1; }
     }
 
+    // ---------------- EIP-5192 / EIP-5484 Views ----------------
+
     /**
-     * @notice EIP-5192: 토큰의 잠금 상태 조회
-     * @param tokenId 조회할 토큰의 ID
-     * @return true (항상 잠금 상태)
-     * @dev 
-     * - IERC5192 인터페이스 구현
-     * - 본 구현에서는 모든 토큰이 영구 잠금 상태
+     * @notice EIP-5192: 토큰 잠금 여부
+     * @param tokenId 조회할 토큰 ID
+     * @return 토큰이 잠금 상태인지 여부(true/false)
      */
     function locked(uint256 tokenId) external view override(IERC5192) returns (bool) {
         _requireOwned(tokenId);
@@ -184,12 +269,9 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
     }
 
     /**
-     * @notice EIP-5484: 토큰의 소각 권한 조회
-     * @param tokenId 조회할 토큰의 ID
-     * @return 해당 토큰의 소각 권한 설정
-     * @dev 
-     * - IERC5484 인터페이스 구현
-     * - 민트 시점에 설정된 권한을 반환
+     * @notice EIP-5484: 소각 권한 정책 조회
+     * @param tokenId 조회할 토큰 ID
+     * @return BurnAuth 소각 권한 정책 값
      */
     function burnAuth(uint256 tokenId) external view override(IERC5484) returns (BurnAuth) {
         _requireOwned(tokenId);
@@ -197,12 +279,9 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
     }
 
     /**
-     * @notice 토큰 발행자 주소 조회
-     * @param tokenId 조회할 토큰의 ID
-     * @return 해당 토큰을 발행한 주소
-     * @dev 
-     * - EIP-5484의 발행자 정보 제공
-     * - 소각 권한 검증에 사용
+     * @notice EIP-5484: 발행자 주소 조회
+     * @param tokenId 조회할 토큰 ID
+     * @return 발행자 주소
      */
     function issuerOf(uint256 tokenId) external view returns (address) {
         _requireOwned(tokenId);
@@ -210,159 +289,60 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
     }
 
     /**
-     * @notice 토큰의 현재 등급 조회
-     * @param tokenId 조회할 토큰의 ID
-     * @return 해당 토큰의 현재 등급
-     * @dev 
-     * - 등급은 구매량에 따라 자동 업그레이드
-     * - 다운그레이드는 불가능
+     * @notice 현재 존재하는 SBT 총 개수(total supply)
+     * @return 현재 총 발행량(소각 제외)
      */
-    function currentTier(uint256 tokenId) external view returns (Tier) {
-        _requireOwned(tokenId);
-        return _tierOf[tokenId];
+    function totalSupply() external view returns (uint256) {
+        return _totalSupply;
     }
 
-    /**
-     * @notice 구매량 기반 자동 등급 업그레이드 - admin 전용
-     * @param tokenId 업그레이드할 토큰의 ID
-     * @param totalBoxesPurchased 누적 구매 박스 수량
-     * @dev 
-     * - onlyAdmin만 호출 가능
-     * - 구매량에 따라 자동으로 등급 산정
-     * - 다운그레이드 방지 로직 적용
-     */
-    function upgradeBadgeByCount(uint256 tokenId, uint256 totalBoxesPurchased) external onlyAdmin {
-        _requireOwned(tokenId);
-        Tier newTier = _tierFromCount(totalBoxesPurchased);
-        _upgradeBadge(tokenId, newTier);
-    }
+    // ---------------- Internal: Tier Logic ----------------
 
     /**
-     * @notice 직접 등급 지정 업그레이드 - admin 전용
-     * @param tokenId 업그레이드할 토큰의 ID
-     * @param newTier 설정할 새로운 등급
-     * @dev 
-     * - onlyAdmin만 호출 가능
-     * - 유효한 등급 범위 검증
-     * - 다운그레이드 방지 로직 적용
+     * @notice 내부 등급 갱신 로직(다운그레이드 금지)
+     * @param tokenId 대상 토큰 ID
+     * @param newTier 갱신할 신규 등급
      */
-    function upgradeBadge(uint256 tokenId, Tier newTier) external onlyAdmin {
-        _requireOwned(tokenId);
-        if (newTier == Tier.None || uint8(newTier) > uint8(Tier.Moon)) {
-            revert InvalidTier();
-        }
-        _upgradeBadge(tokenId, newTier);
-    }
-
-    /**
-     * @notice 내부 등급 업그레이드 로직 - 다운그레이드 방지
-     * @param tokenId 업그레이드할 토큰의 ID
-     * @param newTier 설정할 새로운 등급
-     * @dev 
-     * - 다운그레이드 방지 로직 적용
-     * - 등급별 메타데이터 URI 자동 업데이트
-     * - ERC4906 MetadataUpdate 이벤트 자동 발생 (OZ v5)
-     * - BadgeUpgraded 이벤트 발생
-     */
-    function _upgradeBadge(uint256 tokenId, Tier newTier) internal {
-        Tier old = _tierOf[tokenId];
-        // 다운그레이드 방지
+    function _upgradeBadge(uint256 tokenId, IBadgeSBT.Tier newTier) internal {
+        IBadgeSBT.Tier old = _tierOf[tokenId];
         if (uint8(newTier) < uint8(old)) {
             revert InvalidTier();
         }
-        string memory newUri = _uriForTier(newTier);
         _tierOf[tokenId] = newTier;
-        _setTokenURI(tokenId, newUri); // ERC4906의 MetadataUpdate 이벤트가 내부에서 발생(OZ v5)
 
-        emit BadgeUpgraded(tokenId, old, newTier, newUri);
+        emit IERC4906.MetadataUpdate(tokenId);    // Resolver 기반: tokenURI는 동적 반영
+        emit BadgeUpgraded(tokenId, old, newTier);
     }
 
     /**
-     * @notice 구매 박스 수량에 따른 등급 산정
-     * @param n 누적 구매 박스 수량
-     * @return 해당 수량에 맞는 등급
-     * @dev 
-     * - Sprout: 1 ~ 4
-     * - Cloud: 5 ~ 9
-     * - Airplane: 10 ~ 19
-     * - Rocket: 20 ~ 49
-     * - SpaceStation: 50 ~ 99
-     * - Moon: 100 ~
+     * @notice 누적 박스 수 → 등급 맵핑
+     * @param n 누적 구매 박스 수
+     * @return 해당 수치에 대응하는 등급(IBadgeSBT.Tier)
      */
-    function _tierFromCount(uint256 n) internal pure returns (Tier) {
-        if (n >= TIER_SSTATION_MAX) { // 100+
-            return Tier.Moon;
-        }
-        if (n >= TIER_ROCKET_MAX) { // 50..99
-            return Tier.SpaceStation;
-        }
-        if (n >= TIER_AIRPLANE_MAX) { // 20..49
-            return Tier.Rocket;
-        }
-        if (n >= TIER_CLOUD_MAX) { // 10..19
-            return Tier.Airplane;
-        }
-        if (n >= TIER_SPROUT_MAX) { // 5..9
-            return Tier.Cloud;
-        }
-        return Tier.Sprout; // 0..4 (문서상 1..4이지만 0은 실사용상 없거나 첫 민팅 직후)
+    function _tierFromCount(uint256 n) internal pure returns (IBadgeSBT.Tier) {
+        if (n >= TIER_SSTATION_MAX) return IBadgeSBT.Tier.Moon;         // 100+
+        if (n >= TIER_ROCKET_MAX)   return IBadgeSBT.Tier.SpaceStation;  // 50..99
+        if (n >= TIER_AIRPLANE_MAX) return IBadgeSBT.Tier.Rocket;        // 20..49
+        if (n >= TIER_CLOUD_MAX)    return IBadgeSBT.Tier.Airplane;      // 10..19
+        if (n >= TIER_SPROUT_MAX)   return IBadgeSBT.Tier.Cloud;         // 5..9
+        return IBadgeSBT.Tier.Sprout;                                     // 0..4
     }
 
+    // ---------------- Soulbound: 전송/승인 차단 ----------------
 
     /**
-     * @notice 등급별 메타데이터 URI 반환
-     * @param t 조회할 등급
-     * @return 해당 등급의 메타데이터 URI
-     * @dev 
-     * - 각 등급별로 고정된 URI 반환
-     * - 유효하지 않은 등급인 경우 revert
-     * - URI는 상수로 하드코딩되어 있음
-     */
-    function _uriForTier(Tier t) internal pure returns (string memory) {
-        if (t == Tier.Sprout) {
-            return URI_SPROUT;
-        }
-        if (t == Tier.Cloud) {
-            return URI_CLOUD;
-        }
-        if (t == Tier.Airplane) {
-            return URI_AIRPLANE;
-        }
-        if (t == Tier.Rocket) {
-            return URI_ROCKET;
-        }
-        if (t == Tier.SpaceStation) {
-            return URI_SPACESTATION;
-        }
-        if (t == Tier.Moon) {
-            return URI_MOON;
-        }
-        revert InvalidTier();
-    }
-
-    // =========================
-    // Soulbound: 전송/승인 차단
-    // =========================
-
-    /**
-     * @notice OpenZeppelin v5 단일 훅 - 전송 차단 로직
-     * @param to 토큰을 받을 주소
-     * @param tokenId 전송할 토큰의 ID
-     * @param auth 인증된 주소
-     * @return from 업데이트된 주소
-     * @dev 
-     * - OZ v5: _before/_afterTokenTransfer 대신 단일 훅 `_update` 사용
-     * - mint: from == address(0) 허용
-     * - burn: to == address(0) 허용
-     * - transfer: from != 0 && to != 0 차단 (Soulbound)
-     * - 주의: mint/burn 경로에서 ownerOf()는 revert 하므로 _ownerOf() 사용
+     * @notice 전송/승인 전부 차단을 위한 핵심 훅 오버라이드
+     * @dev    from!=0 && to!=0 (정상 전송) 상황을 검출해 즉시 revert
+     * @param to 수신자 주소(민트/소각 아닌 경우 금지)
+     * @param tokenId 토큰 ID
+     * @param auth 호출자 주소(권한 판정용)
+     * @return from 이전 소유자 주소(민트 시 0, 소각 시 기존 소유자)
      */
     function _update(address to, uint256 tokenId, address auth)
         internal
         override(ERC721)
         returns (address from)
     {
-        // 주의: mint/burn 경로에서 ownerOf()는 revert 하므로 _ownerOf() 사용
         from = _ownerOf(tokenId);
         if (from != address(0) && to != address(0)) {
             revert SBT_TransferNotAllowed();
@@ -371,10 +351,27 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
         if (to == address(0)) {
             _cleanupTokenState(tokenId);
         }
-
         return from;
     }
 
+    // 승인 관련도 차단(권장)
+    function approve(address /*to*/, uint256 /*tokenId*/) public pure override {
+        revert SBT_ApprovalNotAllowed();
+    }
+    function setApprovalForAll(address /*operator*/, bool /*approved*/) public pure override {
+        revert SBT_ApprovalNotAllowed();
+    }
+    function getApproved(uint256 /*tokenId*/) public pure override returns (address) {
+        return address(0);
+    }
+    function isApprovedForAll(address /*owner_*/, address /*operator*/) public pure override returns (bool) {
+        return false;
+    }
+
+    /**
+     * @notice 소각 시 토큰 관련 상태 정리
+     * @param tokenId 정리할 토큰 ID
+     */
     function _cleanupTokenState(uint256 tokenId) private {
         delete _locked[tokenId];
         delete _burnAuth[tokenId];
@@ -382,17 +379,13 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
         delete _tierOf[tokenId];
     }
 
-    // =========================
-    // ERC-721 / URIStorage / ERC165
-    // =========================
+    // ---------------- tokenURI / ERC165 ----------------
 
     /**
-     * @notice 토큰의 메타데이터 URI 조회
-     * @param tokenId 조회할 토큰의 ID
-     * @return 해당 토큰의 메타데이터 URI
-     * @dev 
-     * - ERC721URIStorage의 tokenURI 함수 호출
-     * - 등급 업그레이드 시 URI가 자동으로 변경됨
+     * @notice tokenURI 조회(Resolver 위임)
+     * @dev Resolver가 반드시 설정되어 있어야 하며, 미설정 시 revert
+     * @param tokenId 조회할 토큰 ID
+     * @return 등급별 Resolver가 반환하는 메타데이터 URI
      */
     function tokenURI(uint256 tokenId)
         public
@@ -400,17 +393,16 @@ contract BadgeSBT is ERC721URIStorage, IERC5192, IERC5484, Ownable {
         override 
         returns (string memory)
     {
-        return ERC721URIStorage.tokenURI(tokenId);
+        _requireOwned(tokenId);
+        address r = address(_resolver);
+        if (r == address(0)) revert ResolverNotSet();
+        return _resolver.tokenURI(tokenId);
     }
 
     /**
-     * @notice ERC-165 인터페이스 지원 여부 조회
-     * @param interfaceId 조회할 인터페이스 ID
-     * @return 해당 인터페이스를 지원하면 true
-     * @dev 
-     * - ERC721 기본 인터페이스 지원
-     * - IERC5192 (EIP-5192) 인터페이스 지원: 0xb45a3c0e
-     * - IERC5484 (EIP-5484) 인터페이스 지원: 0x0489b56f
+     * @notice ERC165 인터페이스 지원 선언
+     * @param interfaceId 조회할 인터페이스 ID(ERC165)
+     * @return 지원 여부
      */
     function supportsInterface(bytes4 interfaceId)
         public

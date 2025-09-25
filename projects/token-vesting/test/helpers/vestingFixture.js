@@ -116,13 +116,20 @@ async function deployFixture() {
 
 
     // === BadgeSBT 배포: admin = vesting (mint/upgrade가 onlyAdmin이므로) ===
-    const BadgeSBT = await ethers.getContractFactory("BadgeSBT");
+    const BadgeSBT = await ethers.getContractFactory('BadgeSBT');
     const sbt = await BadgeSBT.deploy(
         "Badge",                               // name: SBT 토큰 이름
         "BDG",                                 // symbol: SBT 토큰 심볼
         await vesting.getAddress()             // admin: 베스팅 컨트랙트가 SBT 관리
     );
     await sbt.waitForDeployment();
+    let sbtAddr = await sbt.getAddress();
+
+    const Resolver = await ethers.getContractFactory('BadgeSbtTierUriResolver', owner);
+    const resolver = await Resolver.deploy(sbtAddr);
+    await resolver.waitForDeployment();
+    let resolverAddr = await resolver.getAddress();
+    await sbt.setResolver(resolverAddr);
 
     // === TokenVesting에 SBT 주소 연결 ===
     (await vesting.setBadgeSBT(await sbt.getAddress())).wait();

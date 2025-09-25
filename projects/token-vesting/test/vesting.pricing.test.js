@@ -190,10 +190,10 @@ describe("TokenVesting - pricing & buyBox amount check (using vestingFixture)", 
             ).to.be.revertedWith("ref len!=8");
         });
 
-        it("setReferralDiscount: 100 초과는 'discount rate: out of range' revert", async function () {
+        it("setReferralDiscount: 100 초과는 'out of range' revert", async function () {
             await expect(
                 vesting.connect(owner).setReferralDiscount(refCode, 101n)
-            ).to.be.revertedWith("discount rate: out of range");
+            ).to.be.revertedWith("out of range");
         });
 
         it("할인 정상 적용: 10% 설정 후 estimatedTotalAmount에 315 USDT(=350*0.9) 반영", async function () {

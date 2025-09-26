@@ -137,3 +137,9 @@
 [submodule "projects/zk-playground/zk-02_commitments-merkle/lib/openzeppelin-contracts"]
 	path = projects/zk-playground/zk-02_commitments-merkle/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/web3auth-mpc/lib/forge-std"]
+	path = projects/web3auth-mpc/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/web3auth-mpc/lib/openzeppelin-contracts"]
+	path = projects/web3auth-mpc/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

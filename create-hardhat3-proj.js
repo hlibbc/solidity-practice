@@ -8,6 +8,7 @@ const path = require("path");
 const { execSync } = require("child_process");
 
 const projectName = process.argv[2];
+const pkgName = projectName.split("/").pop(); // 프로젝트 내 서브프로젝트 식별 (ex. zk-playground/zk-01_basic-arithmetic)
 
 if (!projectName) {
     console.error("❌ 프로젝트 이름을 인자로 넘겨주세요. 예: node create-hardhat3-proj.js hardhat3-test");

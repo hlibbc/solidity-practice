@@ -1,0 +1,39 @@
+{
+    "name": "web3auth-mpc",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "compile": "hardhat compile",
+        "build": "hardhat build",
+        "test": "hardhat test",
+        "typecheck": "tsc --noEmit",
+        "deploy": "hardhat ignition deploy ignition/modules/Example.ts",
+        "deploy:dev": "hardhat ignition deploy ignition/modules/Example.ts --network development",
+        "deploy:reset": "hardhat ignition deploy ignition/modules/Example.ts --network development --reset",
+        "mpc:cli": "node scripts/mpc-google-cli.mjs"
+    },
+    "devDependencies": {
+        "@nomicfoundation/hardhat-ignition": "^3.0.2",
+        "@nomicfoundation/hardhat-ignition-viem": "^3.0.2",
+        "@nomicfoundation/hardhat-keystore": "^3.0.0",
+        "@nomicfoundation/hardhat-network-helpers": "^3.0.0",
+        "@nomicfoundation/hardhat-toolbox-viem": "^5.0.0",
+        "@nomicfoundation/hardhat-verify": "^3.0.0",
+        "@openzeppelin/contracts": "^5.4.0",
+        "@types/node": "^22.18.1",
+        "dotenv": "^17.2.2",
+        "hardhat": "^3.0.4",
+        "typescript": "~5.8.0",
+        "viem": "^2.37.3"
+    },
+    "dependencies": {
+        "@toruslabs/tss-dkls-lib": "^4.1.0",
+        "@web3auth/ethereum-mpc-provider": "^9.7.0",
+        "@web3auth/mpc-core-kit": "^3.5.0",
+        "ethers": "^6.15.0",
+        "express": "^5.1.0",
+        "google-auth-library": "^10.3.0",
+        "open": "^10.2.0"
+    }
+}

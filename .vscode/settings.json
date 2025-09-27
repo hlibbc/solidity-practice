@@ -1,0 +1,61 @@
+{
+    // 🔍 검색/인덱싱 제외
+    "search.exclude": {
+        "**/node_modules": true,
+        "**/artifacts": true,
+        "**/cache": true,
+        "**/out": true,
+        "**/build": true,
+        "**/dist": true,
+        "**/coverage": true,
+        "**/.next": true,
+        "**/.turbo": true,
+        "**/typechain-types": true,
+        "**/generated": true
+    },
+    "files.exclude": {
+        "**/node_modules": true,
+        "**/artifacts": true,
+        "**/cache": true,
+        "**/out": true,
+        "**/build": true,
+        "**/dist": true,
+        "**/coverage": true,
+        "**/.next": true,
+        "**/.turbo": true,
+        "**/typechain-types": true,
+        "**/generated": true
+    },
+    // 👀 파일 시스템 워처 부담 줄이기
+    "files.watcherExclude": {
+        "**/node_modules/**": true,
+        "**/artifacts/**": true,
+        "**/cache/**": true,
+        "**/out/**": true,
+        "**/build/**": true,
+        "**/dist/**": true,
+        "**/coverage/**": true,
+        "**/.git/objects/**": true,
+        "**/.git/subtree-cache/**": true
+    },
+
+    // 🧠 TypeScript 서버 부하 완화 (하드햇/타입체인 대규모 .d.ts 방어)
+    "typescript.tsserver.maxTsServerMemory": 4096,
+    "typescript.tsserver.watchOptions": {
+        "watchFile": "useFsEventsOnParentDirectory",
+        "watchDirectory": "useFsEvents",
+        "fallbackPolling": "dynamicPriorityPolling"
+    },
+
+    // 🧰 Git 부하 완화
+    "git.autofetch": false,
+    "git.enableStatusBarSync": false,
+    "git.ignoreLimitWarning": true,
+
+    // 🧹 ESLint/Prettier 등 확장 프로그램의 스캔 범위 축소
+    "eslint.workingDirectories": [
+        { "directory": ".", "changeProcessCWD": true }, // 루트 포함
+        { "pattern": "projects/*" }
+    ],
+    "eslint.validate": ["javascript", "typescript", "typescriptreact"]
+}

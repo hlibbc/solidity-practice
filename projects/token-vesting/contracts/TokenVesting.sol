@@ -666,35 +666,36 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
     }
 
     /**
-     * @notice 박스 소유권 이전(내일부터 효력) - 구매 기록/분모에는 영향 없음
-     * @param _to 수령자
+     * @notice 박스 소유권 이전(당일부터 효력) - 구매 기록/분모에는 영향 없음
+     * @param _from 소유권을 넘길 주소
+     * @param _to   소유권을 받을 주소
      * @param _boxCount 이전 수량
      * @dev 
-     * - 오늘 보유량에서 boxCount를 차감하여 내일부터 효력 발생(effDay = today + 1)
-     * - 수령자 보유량은 내일부터 _boxCount 증가
+     * - owner 전용 운영 함수
+     * - 오늘 보유량에서 _boxCount를 차감하여 **당일부터** 효력 발생(effDay = today)
+     * - 수령자 보유량은 당일부터 _boxCount 증가
      * - boxesAddedPerDay / cumBoxes(판매량), referralsAddedPerDay 등 '판매/추천 기록'은 변경하지 않음
      * - totalBoughtBoxes, SBT 등은 '구매' 기준이므로 변경하지 않음
      */
     function sendBox(
+        address _from,
         address _to, 
         uint256 _boxCount
     ) external nonReentrant onlyOwner {
         require(scheduleInitialized, "no schedule");
         require(block.timestamp >= vestingStartDate, "not started");
 
-        address sender = _msgSender();
-
-        require(_to != address(0), "zero to");
-        require(_to != sender, "self");
+        require(_from != address(0) && _to != address(0), "zero addr");
+        require(_from != _to, "same addr");
         require(_boxCount > 0, "box=0");
 
         uint256 dToday = (block.timestamp - vestingStartDate) / SECONDS_PER_DAY;
-        uint256 effDay = dToday; //  요청반영: 소유권이전 시 당일부터 효력발생
+        uint256 effDay = dToday; // 당일부터 효력
 
         // ── from(보낸 사람) 절대값 누적 차감(in-place)
-        BoxAmountCheckpoint[] storage sHist = buyerBoxAmountHistory[sender];
+        BoxAmountCheckpoint[] storage sHist = buyerBoxAmountHistory[_from];
         // base: (같은 effDay 마지막 CP가 있으면 그 amount, 없으면 '오늘 기준 보유량')
-        uint256 base = _balanceAtDay(buyerBoxAmountHistory[sender], dToday);
+        uint256 base = _balanceAtDay(buyerBoxAmountHistory[_from], dToday);
         if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
             base = sHist[sHist.length - 1].amount;
         }
@@ -703,16 +704,19 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         }
 
         uint256 newFromBal = base - _boxCount;
-        if (sHist.length == 0 && lastBuyerClaimedDay[sender] == 0) {
-            lastBuyerClaimedDay[sender] = UNSET;
+
+        // 최초 이전 시 lastBuyerClaimedDay 초기화(필요 시)
+        if (sHist.length == 0 && lastBuyerClaimedDay[_from] == 0) {
+            lastBuyerClaimedDay[_from] = UNSET;
         }
+
+        // 같은 effDay면 마지막 체크포인트를 in-place 수정, 아니면 새 CP 추가
         if (sHist.length != 0 && sHist[sHist.length - 1].day == effDay) {
-            // 같은 effDay면 마지막 체크포인트를 in-place 수정
             sHist[sHist.length - 1].amount = newFromBal;
         } else {
-            // 새 effDay면 절대값 체크포인트 추가
             sHist.push(BoxAmountCheckpoint({ day: effDay, amount: newFromBal }));
         }
+
         // ── to(받는 사람) 누적 증가(구매와 동일 가산 로직)
         _pushBuyerCheckpoint(_to, effDay, _boxCount);
         // 수령자 레퍼럴 코드 보장(선택)
@@ -721,7 +725,7 @@ contract TokenVesting is Ownable, ReentrancyGuard, ERC2771Context {
         uint256 sbtIdTo = _ensureSbt(_to);
         _upgradeBadgeIfNeeded(_to, sbtIdTo);
 
-        emit BoxesTransferred(sender, _to, _boxCount, (uint64)(block.timestamp));
+        emit BoxesTransferred(_from, _to, _boxCount, uint64(block.timestamp));
     }
 
     /**

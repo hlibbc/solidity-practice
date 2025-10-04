@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2155
-# Bash 3 호환: 연관배열 없이 case 매핑 사용
 # Mac/Bash3, zsh에서 실행될 경우를 대비해 bash로 재실행
 if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
-
 set -euo pipefail
 
 # ==============================================================================
@@ -18,7 +15,9 @@ POWERS_DIR="${ROOT_DIR}/lib/powers"
 
 # circom include 경로(필요 시 추가)
 INCLUDE_DIRS=("${CIRCUIT_DIR}")
-# node_modules/circomlib 등 추가하려면 아래 주석 해제
+# circomlib 경로 자동 추가
+[ -d "${ROOT_DIR}/node_modules" ] && INCLUDE_DIRS+=("${ROOT_DIR}/node_modules")
+[ -d "${ROOT_DIR}/node_modules/circomlib/circuits" ] && INCLUDE_DIRS+=("${ROOT_DIR}/node_modules/circomlib/circuits")
 # [ -d "${ROOT_DIR}/node_modules/circomlib/circuits" ] && INCLUDE_DIRS+=("${ROOT_DIR}/node_modules/circomlib/circuits")
 
 # 최소 PTAU power (환경변수로 오버라이드 가능)
@@ -60,42 +59,31 @@ EOF
 }
 
 # 인자 없으면 help 보장
-if [ $# -eq 0 ]; then
-    usage
-    exit 0
-fi
+if [ $# -eq 0 ]; then usage; exit 0; fi
 
 # ==============================================================================
 # Utils
 # ==============================================================================
 require_cmd() {
-    command -v "$1" >/dev/null 2>&1 || {
-        echo "[ERR] '$1' not found. Please install." >&2
-        exit 1
-    }
+    command -v "$1" >/dev/null 2>&1 || { echo "[ERR] '$1' not found. Please install." >&2; exit 1; }
 }
-
 exists_in_array() {
     local needle="$1"; shift
     for x in "$@"; do [ "$x" = "$needle" ] && return 0; done
     return 1
 }
-
 resolve_targets() {
     local sel="${1:-all}"
     if [ "$sel" = "all" ]; then
         echo "${TARGETS[@]}"
     else
         if ! exists_in_array "$sel" "${TARGETS[@]}"; then
-            echo "[ERR] Unknown target: $sel" >&2
-            exit 1
+            echo "[ERR] Unknown target: $sel" >&2; exit 1
         fi
         echo "$sel"
     fi
 }
-
 ensure_inputs_dir() { mkdir -p "${INPUT_DIR}"; }
-
 ci_includes_flags() {
     local flags=()
     for d in "${INCLUDE_DIRS[@]}"; do flags+=(-l "$d"); done
@@ -123,43 +111,133 @@ get_main_for() {
     esac
 }
 
+# === Heartbeat logger (30s 간격; HEARTBEAT_EVERY로 조정) ===
+HEARTBEAT_EVERY="${HEARTBEAT_EVERY:-30}"
+heartbeat() {
+    local pid="$1"; local label="$2"; local every="${3:-$HEARTBEAT_EVERY}"
+    [ "$every" -le 0 ] && return 0
+    while kill -0 "$pid" 2>/dev/null; do
+        echo "[... $(date +%H:%M:%S)] ${label} (still running)" >&2
+        sleep "$every"
+    done
+}
+run_hb() {
+    local label="$1"; shift
+    # ★ child stdout→stderr로 리다이렉트해서 호출부의 $(...)에 섞이지 않게 한다
+    ( "$@" 1>&2 ) & local cmdpid=$!
+    heartbeat "$cmdpid" "$label" &
+    local hpid=$!
+    wait "$cmdpid"; local status=$?
+    kill "$hpid" 2>/dev/null || true
+    wait "$hpid" 2>/dev/null || true
+    return $status
+}
+
+# === Entropy generator for snarkjs --entropy / -e ===
+make_entropy() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32
+    else
+        # 포터블 난수 (충분히 비대화식)
+        echo "$RANDOM-$(date +%s 2>/dev/null || echo 0)-$RANDOM-$$-${HOSTNAME:-h}"
+    fi
+}
+
+
+# --- SNARKJS runner (auto-detect: PATH, pnpm dlx, npx) -----------------------
+SNARKJS_ARR=()
+ensure_snarkjs() {
+    if [ -n "${SNARKJS:-}" ] && [ ${#SNARKJS_ARR[@]} -eq 0 ]; then
+        IFS=' ' read -r -a SNARKJS_ARR <<< "$SNARKJS"; return
+    fi
+    if command -v snarkjs >/dev/null 2>&1; then SNARKJS_ARR=(snarkjs); return; fi
+    if command -v pnpm   >/dev/null 2>&1; then SNARKJS_ARR=(pnpm -s dlx snarkjs); return; fi
+    if command -v npx    >/dev/null 2>&1; then SNARKJS_ARR=(npx -y snarkjs); return; fi
+    echo "[ERR] snarkjs not found. Install pnpm/npx or set SNARKJS=\"pnpm -s dlx snarkjs\"." >&2
+    exit 1
+}
+sj() { ensure_snarkjs; "${SNARKJS_ARR[@]}" "$@"; }
+
 # ==============================================================================
 # PTAU 자동 산정 & 보장
 # ==============================================================================
 calc_needed_power_from_r1cs() {
-    require_cmd snarkjs
     local r1cs="$1"
-    local info="$(snarkjs r1cs info "$r1cs" 2>/dev/null || true)"
-    local constraints="$(printf "%s\n" "$info" | grep -i "constraints" | grep -Eo '[0-9]+' | head -1)"
+    local info constraints REQ needed tmp
+
+    # r1cs 정보 추출
+    info="$(sj r1cs info "$r1cs" 2>/dev/null || true)"
+
+    # '# of constraints:' 라인에서 숫자만 정확히 추출
+    constraints="$(printf "%s\n" "$info" | awk -F': ' '/# of constraints/ {print $2}' | tr -cd '0-9')"
+
+    # 파싱 실패 시 최소 파워 사용
     if [ -z "${constraints:-}" ]; then
-        echo "${MIN_PTAU_POWER}"; return 0
+        echo "${MIN_PTAU_POWER}"
+        return 0
     fi
-    local REQ="$constraints" needed=0 tmp=$((REQ - 1))
-    while [ $tmp -gt 0 ]; do tmp=$((tmp >> 1)); needed=$((needed + 1)); done
-    [ $needed -lt $MIN_PTAU_POWER ] && needed=$MIN_PTAU_POWER
+
+    REQ="$constraints"
+    # 0이나 비정상 값 방지
+    if ! [ "$REQ" -ge 1 ] 2>/dev/null; then
+        echo "${MIN_PTAU_POWER}"
+        return 0
+    fi
+
+    needed=0
+    tmp=$(( REQ - 1 ))
+    while [ $tmp -gt 0 ]; do
+        tmp=$(( tmp >> 1 ))
+        needed=$(( needed + 1 ))
+    done
+
+    # 안전 마진: 최소 MIN_PTAU_POWER 보장
+    if [ "$needed" -lt "$MIN_PTAU_POWER" ]; then
+        needed="$MIN_PTAU_POWER"
+    fi
+
     echo "$needed"
 }
 
 ensure_ptau() {
-    require_cmd snarkjs
     local power="$1"
+
+    # sanity check
+    if ! [[ "$power" =~ ^[0-9]+$ ]]; then
+        echo "[WARN] invalid power '$power'; fallback to MIN_PTAU_POWER=${MIN_PTAU_POWER}" >&2
+        power="${MIN_PTAU_POWER}"
+    fi
+    if [ "$power" -lt 1 ] || [ "$power" -gt 28 ]; then
+        echo "[WARN] power out of range ($power); clamp to [1,28] then apply MIN_PTAU_POWER" >&2
+        [ "$power" -lt 1 ] && power=1
+        [ "$power" -gt 28 ] && power=28
+        if [ "$power" -lt "$MIN_PTAU_POWER" ]; then power="$MIN_PTAU_POWER"; fi
+    fi
+
     local raw="${POWERS_DIR}/pot${power}.ptau"
     local final="${POWERS_DIR}/pot${power}_final.ptau"
     mkdir -p "${POWERS_DIR}"
+
     if [ ! -f "$raw" ]; then
-        echo "[POT] powersoftau new -> $raw"
-        snarkjs powersoftau new bn128 "$power" "$raw" -v
+        echo "[POT] powersoftau new -> $raw" >&2
+        run_hb "powersoftau new (2^$power)" sj powersoftau new bn128 "$power" "$raw" -v
     else
-        echo "[POT] exists: $raw"
+        echo "[POT] exists: $raw" >&2
     fi
+
     if [ ! -f "$final" ]; then
-        echo "[POT] contribute -> $final"
-        snarkjs powersoftau contribute "$raw" "$final" --name="auto contribution" -v
+        # ⚠️ snarkjs 0.7.5는 contribute에 옵션이 없어 비대화식이 어려움 → prepare phase2 사용
+        echo "[POT] prepare phase2 -> $final" >&2
+        run_hb "powersoftau prepare phase2 (2^$power)" sj powersoftau prepare phase2 "$raw" "$final"
     else
-        echo "[POT] exists: $final"
+        echo "[POT] exists: $final" >&2
     fi
+
+    # stdout에는 '경로'만 출력 (호출측에서 $(...)로 안전히 받도록)
     printf "%s" "$final"
 }
+
+
 
 # ==============================================================================
 # Steps
@@ -168,7 +246,6 @@ step_pot() {
     local power="${1:-$MIN_PTAU_POWER}"
     ensure_ptau "$power" >/dev/null
 }
-
 make_wrapper_for() {
     local key="$1"
     local out="${BUILD_ROOT}/${key}"
@@ -178,13 +255,13 @@ make_wrapper_for() {
     local wrapper="${out}/${key}.wrapper.circom"
     mkdir -p "$out"
     cat > "$wrapper" <<EOF
+pragma circom 2.1.6;
 include "${src_abs}";
 // Auto-generated main wrapper for target '${key}'
 component main = ${main_expr};
 EOF
     echo "$wrapper"
 }
-
 step_compile_one() {
     require_cmd circom
     local key="$1"
@@ -195,11 +272,8 @@ step_compile_one() {
     # shellcheck disable=SC2207
     local lflags=($(ci_includes_flags))
     circom "$wrapper" --r1cs --wasm --sym -o "$out" "${lflags[@]}"
-    # out: ${out}/${key}.wrapper.r1cs, ${out}/${key}.wrapper_js/${key}.wrapper.wasm
 }
-
 step_key_one() {
-    require_cmd snarkjs
     local key="$1"
     local out="${BUILD_ROOT}/${key}"
     local r1cs="${out}/${key}.wrapper.r1cs"
@@ -208,11 +282,10 @@ step_key_one() {
     echo "    - required PTAU power: $pow"
     local PTAU="$(ensure_ptau "$pow")"
     echo "    - using PTAU: $PTAU"
-    snarkjs groth16 setup "$r1cs" "$PTAU" "${out}/${key}_0000.zkey"
-    snarkjs zkey contribute "${out}/${key}_0000.zkey" "${out}/${key}_final.zkey" --name="${key} contributor" -v
-    snarkjs zkey export verificationkey "${out}/${key}_final.zkey" "${out}/verification_key.json"
+    sj groth16 setup "$r1cs" "$PTAU" "${out}/${key}_0000.zkey"
+    sj zkey contribute "${out}/${key}_0000.zkey" "${out}/${key}_final.zkey" --name="${key} contributor" -v
+    sj zkey export verificationkey "${out}/${key}_final.zkey" "${out}/verification_key.json"
 }
-
 step_witness_one() {
     require_cmd node
     local key="$1"
@@ -224,46 +297,36 @@ step_witness_one() {
     [ -f "$input" ] || { echo "[ERR] input not found: $input" >&2; exit 1; }
     node "${js}/generate_witness.js" "$wasm" "$input" "${out}/witness.wtns"
 }
-
 step_prove_one() {
-    require_cmd snarkjs
     local key="$1"
     local out="${BUILD_ROOT}/${key}"
     echo "[PROVE] $key"
-    snarkjs groth16 prove "${out}/${key}_final.zkey" "${out}/witness.wtns" "${out}/proof.json" "${out}/public.json"
+    sj groth16 prove "${out}/${key}_final.zkey" "${out}/witness.wtns" "${out}/proof.json" "${out}/public.json"
 }
-
 step_verify_one() {
-    require_cmd snarkjs
     local key="$1"
     local out="${BUILD_ROOT}/${key}"
     echo "[VERIFY] $key"
-    snarkjs groth16 verify "${out}/verification_key.json" "${out}/public.json" "${out}/proof.json"
+    sj groth16 verify "${out}/verification_key.json" "${out}/public.json" "${out}/proof.json"
 }
-
 step_calldata_one() {
-    require_cmd snarkjs
     local key="$1"
     local out="${BUILD_ROOT}/${key}"
     echo "[CALLDATA] $key"
-    snarkjs generatecall "${out}/proof.json" "${out}/public.json" > "${out}/calldata.txt"
+    sj generatecall "${out}/proof.json" "${out}/public.json" > "${out}/calldata.txt"
     echo "  -> ${out}/calldata.txt"
 }
-
 step_verifier_one() {
-    require_cmd snarkjs
     local key="$1"
     local out="${BUILD_ROOT}/${key}"
     mkdir -p "${CONTRACTS_DIR}"
     local sol="${CONTRACTS_DIR}/${key}_Verifier.sol"
-    local cname="${key}_Verifier"  # Bash3 호환: 간단한 식별자 사용
+    local cname="${key}_Verifier"
     echo "[SOLIDITY VERIFIER] $key -> ${sol} (contract ${cname})"
-    # snarkjs가 --name 옵션을 지원하면 사용, 아니면 sed로 대체
-    if snarkjs zkey export solidityverifier --help 2>/dev/null | grep -q -- "--name"; then
-        snarkjs zkey export solidityverifier "${out}/${key}_final.zkey" "${sol}" --name "${cname}"
+    if sj zkey export solidityverifier --help 2>/dev/null | grep -q -- "--name"; then
+        sj zkey export solidityverifier "${out}/${key}_final.zkey" "${sol}" --name "${cname}"
     else
-        snarkjs zkey export solidityverifier "${out}/${key}_final.zkey" "${sol}"
-        # BSD sed 호환 치환: 'contract Verifier' → 'contract <cname>'
+        sj zkey export solidityverifier "${out}/${key}_final.zkey" "${sol}"
         sed -i '' "s/contract[[:space:]]\+Verifier/contract ${cname}/" "${sol}" 2>/dev/null \
         || sed -i "s/contract[[:space:]]\+Verifier/contract ${cname}/" "${sol}"
     fi
@@ -300,7 +363,6 @@ do_clean() {
 # ==============================================================================
 cmd="${1:-help}"
 arg="${2:-all}"
-
 case "$cmd" in
     pot)        step_pot "${2:-$MIN_PTAU_POWER}" ;;
     compile)    do_compile "$arg" ;;

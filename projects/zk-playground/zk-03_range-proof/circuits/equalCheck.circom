@@ -32,24 +32,33 @@ template EnforceEqual() {
     a - b === 0;
 }
 
+template IsZero() {
+    signal input in;
+    signal output out;
+    signal inv;
+
+    // 1) inv를 먼저 witness 대입으로 '초기화'
+    //    - in = 0  이면 inv = 0
+    //    - in != 0 이면 inv = 1/in   (유한체 역원)
+    inv <-- (in == 0 ? 0 : 1/in);
+
+    // 2) out을 inv에 '연결' (등식 제약도 함께 추가)
+    out <== 1 - in * inv;
+
+    // 3) in != 0 이면 out=0 이 되도록 강제
+    in * out === 0;
+}
+
+
 // 2) "동등 여부를 boolean으로 출력"하는 버전 (증명은 항상 생성 가능, eq가 정직해야 함)
 template IsEqualBool() {
     signal input a;
     signal input b;
     signal output eq;
-    signal inv;
 
-    // eq는 반드시 0 또는 1
-    eq * (eq - 1) === 0;
-
-    // a != b 이면 eq=0 이어야 함
-    (a - b) * eq === 0;
-
-    // a == b 이면 eq=1 이 되도록 강제
-    // (a - b) * inv = 1 - eq
-    //  - a==b(=0)면 RHS가 0이 되어 1 - eq = 0 ⇒ eq=1
-    //  - a!=b면 inv = 1/(a-b) 로 잡을 수 있어 1 - eq = 1 ⇒ eq=0
-    (a - b) * inv === 1 - eq;
+    component z = IsZero();
+    z.in <== a - b;
+    eq    <== z.out;
 }
 
 /*

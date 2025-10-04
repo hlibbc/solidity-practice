@@ -26,6 +26,8 @@ Node.js(ESM), ethers v6, `@web3auth/mpc-core-kit`, `@web3auth/ethereum-mpc-provi
 ---
 
 ## 1) Google Cloud Console에서 OAuth 2.0 클라이언트 만들기
+(https://console.cloud.google.com/)
+(https://developers.google.com/oauthplayground)
 
 1. **Google Cloud Console** → **APIs & Services** → **Credentials** 이동  
 2. (처음이라면) **OAuth consent screen** 설정(내부/외부, 앱 정보 최소 입력)  
@@ -39,6 +41,7 @@ Node.js(ESM), ethers v6, `@web3auth/mpc-core-kit`, `@web3auth/ethereum-mpc-provi
 ---
 
 ## 2) Web3Auth 대시보드에서 Client ID & Custom JWT Verifier 만들기
+(https://dashboard.web3auth.io/)
 
 1. **Web3Auth Dashboard** 로그인
 2. 프로젝트 생성 또는 선택 → **Project Settings**에서 **Client ID** 복사  

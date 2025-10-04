@@ -24,3 +24,6 @@ node_modules/
 
 # Ignore Typechain outputs
 **/typechain-types
+
+# Ignore remixd outputs
+**/.deps

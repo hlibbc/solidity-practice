@@ -1,0 +1,16 @@
+{
+  "name": "zk-03_range-proof",
+  "version": "1.0.0",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy": "hardhat run scripts/deploy.js"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^3.0.0",
+    "@openzeppelin/contracts": "^5.4.0",
+    "circomlib": "^2.0.5",
+    "dotenv": "^17.2.0",
+    "hardhat": "^2.25.0"
+  }
+}

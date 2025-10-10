@@ -1,0 +1,44 @@
+{
+    "31337": {
+        "booleanity": {
+            "address": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
+            "txHash": "0x0ecc6007ea06855c7c29dda70c596855d69111b72c10ca3153fd273f2cd9e37e",
+            "contract": "Groth16Verifier",
+            "network": "development",
+            "vkHash": "dea98c787d335032fec399ea63c6d5e14ab0569f19e247772a051e75af83fe06",
+            "updatedAt": "2025-10-10T12:28:19.874Z"
+        },
+        "equal_enforce": {
+            "address": "0x0165878A594ca255338adfa4d48449f69242Eb8F",
+            "txHash": "0xed60c3800bd4c3501e2d8280c050d73d9fcf479f605e8225a085cd0f097a1ed1",
+            "contract": "Groth16Verifier",
+            "network": "development",
+            "vkHash": "93dce5f61f6d27eaf589c8477c948381caced7c0b8355e664a98b9d64dcb47e9",
+            "updatedAt": "2025-10-10T12:28:19.895Z"
+        },
+        "equal_bool": {
+            "address": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
+            "txHash": "0xa559ec5b5ccf83350b62e074b54f0fc879b4709438919d539b7f08afba2fdffe",
+            "contract": "Groth16Verifier",
+            "network": "development",
+            "vkHash": "2fe0e2b1f097d8806c76728b5d40338f379244c4942bb52e81da78cc0f0c7ab9",
+            "updatedAt": "2025-10-10T12:28:19.912Z"
+        },
+        "lt13": {
+            "address": "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
+            "txHash": "0x6540c2cb95190c27a8f4ab3635c56aa86b98f9267847110729f399680a7a18c4",
+            "contract": "Groth16Verifier",
+            "network": "development",
+            "vkHash": "76e694c4d512850730e84e08cb7f26f1b822f1fc742da98457446b6f3bf7f5d7",
+            "updatedAt": "2025-10-10T12:28:19.932Z"
+        },
+        "range_13_10_300": {
+            "address": "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318",
+            "txHash": "0xe5e43b532594831c4dd7d003193735bfed8aeac487fe949cc55b9845dde98ec4",
+            "contract": "Groth16Verifier",
+            "network": "development",
+            "vkHash": "a8d8d9d9f0ade5010b91bf4b462772eba7cc73413e73ea90772f6b3b15ecd507",
+            "updatedAt": "2025-10-10T12:28:19.954Z"
+        }
+    }
+}

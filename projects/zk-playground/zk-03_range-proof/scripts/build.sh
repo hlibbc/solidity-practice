@@ -310,12 +310,20 @@ step_verify_one() {
     sj groth16 verify "${out}/verification_key.json" "${out}/public.json" "${out}/proof.json"
 }
 step_calldata_one() {
+    require_cmd node
     local key="$1"
     local out="${BUILD_ROOT}/${key}"
     echo "[CALLDATA] $key"
-    sj generatecall "${out}/proof.json" "${out}/public.json" > "${out}/calldata.txt"
-    echo "  -> ${out}/calldata.txt"
+    # 실패해도 파이프라인 계속 진행 (snarkjs 0.7.x에서 public 0개 회로가 실패할 수 있음)
+    if ! sj generatecall "${out}/proof.json" "${out}/public.json" > "${out}/calldata.txt" 2> "${out}/calldata.err"; then
+        echo "[WARN] generatecall failed for ${key}. Likely no public signals. Skipping calldata." >&2
+        # 필요하면 빈 파일이라도 남겨 디버깅에 도움
+        : > "${out}/calldata.txt"
+    else
+        echo "  -> ${out}/calldata.txt"
+    fi
 }
+
 step_verifier_one() {
     local key="$1"
     local out="${BUILD_ROOT}/${key}"
@@ -347,8 +355,8 @@ do_all() {
     do_witness "$target"
     do_prove "$target"
     do_verify "$target"
-    do_calldata "$target"
     do_verifier "$target"
+    do_calldata "$target"
 }
 
 do_clean() {

@@ -27,7 +27,6 @@ Node.js(ESM), ethers v6, `@web3auth/mpc-core-kit`, `@web3auth/ethereum-mpc-provi
 
 ## 1) Google Cloud Console에서 OAuth 2.0 클라이언트 만들기
 (https://console.cloud.google.com/)
-(https://developers.google.com/oauthplayground)
 
 1. **Google Cloud Console** → **APIs & Services** → **Credentials** 이동  
 2. (처음이라면) **OAuth consent screen** 설정(내부/외부, 앱 정보 최소 입력)  
@@ -58,7 +57,6 @@ Node.js(ESM), ethers v6, `@web3auth/mpc-core-kit`, `@web3auth/ethereum-mpc-provi
      - (선택) `email_verified = true`
    - 저장 후 **Enabled** 확인
 
-> ⚠️ **네트워크 일치**: 대시보드 Client ID가 **Devnet**이면 코드에서도 `sapphire_devnet`로 초기화해야 합니다. (본 예제는 Devnet 기준)
 
 ---
 
@@ -79,7 +77,7 @@ pnpm -F web3auth-mpc add   @toruslabs/tss-dkls-lib   @web3auth/ethereum-mpc-prov
 ```env
 # Web3Auth
 WEB3AUTH_CLIENT_ID=대시보드_클라이언트_ID
-WEB3AUTH_NETWORK=sapphire_devnet
+WEB3AUTH_NETWORK=DEVNET
 WEB3AUTH_VERIFIER=mpc-test-0002
 
 # Google OAuth (Web application)

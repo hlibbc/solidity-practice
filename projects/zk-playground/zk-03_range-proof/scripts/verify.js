@@ -176,7 +176,9 @@ async function main() {
     const ok = await verifier.verifyProof(a, b, c, input);
     console.log(`\nresult: ${ok ? "✅ VALID" : "❌ INVALID"}`);
 
-    if (!ok) process.exit(2);
+    // ensure provider shutdown so node process can exit cleanly (ethers v6 keeps timers)
+    try { if (typeof provider.destroy === "function") provider.destroy(); } catch {}
+    process.exit(ok ? 0 : 2);
 }
 
 main().catch((err) => {

@@ -31,7 +31,7 @@ template LessThanBool(n) {
     cbit.in <== c;
 
     // MSB가 lt (a<b이면 1)
-    lt <== cbit.out[n];
+    lt <== 1 - cbit.out[n];
 
     // lt는 booleanity가 이미 Num2Bits로 보장됨
 }

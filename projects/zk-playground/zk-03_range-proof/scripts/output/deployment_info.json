@@ -1,44 +1,44 @@
 {
     "31337": {
         "booleanity": {
-            "address": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
-            "txHash": "0x0ecc6007ea06855c7c29dda70c596855d69111b72c10ca3153fd273f2cd9e37e",
+            "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+            "txHash": "0x3e527e6ce1db1b99ef5480eca91b23cb94a65818436c0a5d769c6950f5473f50",
             "contract": "Groth16Verifier",
             "network": "development",
-            "vkHash": "dea98c787d335032fec399ea63c6d5e14ab0569f19e247772a051e75af83fe06",
-            "updatedAt": "2025-10-10T12:28:19.874Z"
+            "vkHash": "7f35a8e32c647778dc08651655c346f936913a6246cd2af45cabaef9f5157fe8",
+            "updatedAt": "2025-10-11T10:39:57.310Z"
         },
         "equal_enforce": {
-            "address": "0x0165878A594ca255338adfa4d48449f69242Eb8F",
-            "txHash": "0xed60c3800bd4c3501e2d8280c050d73d9fcf479f605e8225a085cd0f097a1ed1",
+            "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+            "txHash": "0x03246143c553345494c058b6c13ebdba5a2b7103c4bf229cbc65d41bead741eb",
             "contract": "Groth16Verifier",
             "network": "development",
-            "vkHash": "93dce5f61f6d27eaf589c8477c948381caced7c0b8355e664a98b9d64dcb47e9",
-            "updatedAt": "2025-10-10T12:28:19.895Z"
+            "vkHash": "8bf4147a76a1fbe5e1047a24d88556d48572ec5baa92f604b9938371122e660e",
+            "updatedAt": "2025-10-11T10:39:57.327Z"
         },
         "equal_bool": {
-            "address": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
-            "txHash": "0xa559ec5b5ccf83350b62e074b54f0fc879b4709438919d539b7f08afba2fdffe",
+            "address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+            "txHash": "0xaff8c2ffa8b462009df5e68cee530c3818209838df6428a30caaaf20d3c6e4e0",
             "contract": "Groth16Verifier",
             "network": "development",
-            "vkHash": "2fe0e2b1f097d8806c76728b5d40338f379244c4942bb52e81da78cc0f0c7ab9",
-            "updatedAt": "2025-10-10T12:28:19.912Z"
+            "vkHash": "de1dfe39d318f5db9ef3f8d7026645edc55bdde575d4ea2ca3bd796bc8c0e39e",
+            "updatedAt": "2025-10-11T10:39:57.345Z"
         },
         "lt13": {
-            "address": "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
-            "txHash": "0x6540c2cb95190c27a8f4ab3635c56aa86b98f9267847110729f399680a7a18c4",
+            "address": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
+            "txHash": "0x56f1159a964d5bfd77f7a99ffe7d87303cdfaf190b2c9afb2cc6f2e74ac9a324",
             "contract": "Groth16Verifier",
             "network": "development",
-            "vkHash": "76e694c4d512850730e84e08cb7f26f1b822f1fc742da98457446b6f3bf7f5d7",
-            "updatedAt": "2025-10-10T12:28:19.932Z"
+            "vkHash": "16403fb7027a1bbbcd41cd4384d83d96d6a1a87267678b1e8f71a0fa16921131",
+            "updatedAt": "2025-10-11T10:39:57.364Z"
         },
         "range_13_10_300": {
-            "address": "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318",
-            "txHash": "0xe5e43b532594831c4dd7d003193735bfed8aeac487fe949cc55b9845dde98ec4",
+            "address": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
+            "txHash": "0xd07d5a1cb0045153c493cc5d5bcb61612d06c14a65aac139031d2490abb79af6",
             "contract": "Groth16Verifier",
             "network": "development",
-            "vkHash": "a8d8d9d9f0ade5010b91bf4b462772eba7cc73413e73ea90772f6b3b15ecd507",
-            "updatedAt": "2025-10-10T12:28:19.954Z"
+            "vkHash": "194362b66248c9fffe869529631eaa8589300aaf8ca3ea0e8aa67bd0194949e3",
+            "updatedAt": "2025-10-11T10:39:57.384Z"
         }
     }
 }

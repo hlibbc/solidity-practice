@@ -149,3 +149,15 @@
 [submodule "projects/zk-playground/zk-03_range-proof/lib/openzeppelin-contracts"]
 	path = projects/zk-playground/zk-03_range-proof/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/orakl-vrf/lib/forge-std"]
+	path = projects/orakl-vrf/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/orakl-vrf/lib/openzeppelin-contracts"]
+	path = projects/orakl-vrf/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "lib/orakl"]
+	path = lib/orakl
+	url = https://github.com/Bisonai/orakl
+[submodule "projects/orakl-vrf/lib/orakl"]
+	path = projects/orakl-vrf/lib/orakl
+	url = https://github.com/Bisonai/orakl

@@ -1,7 +1,9 @@
 {
-    // 🔍 검색/인덱싱 제외
+    // 🔍 검색/인덱싱 제외(= search.exclude)
     "search.exclude": {
         "**/node_modules": true,
+        "**/.pnpm-store": true,            // 추가: pnpm 글로벌 스토어
+        "**/.vite": true,                  // 추가: 번들러 캐시
         "**/artifacts": true,
         "**/cache": true,
         "**/out": true,
@@ -11,10 +13,15 @@
         "**/.next": true,
         "**/.turbo": true,
         "**/typechain-types": true,
-        "**/generated": true
+        "**/generated": true,
+        "**/broadcast": true               // 추가: Foundry 실행 산출물
     },
+
+    // 👁️ 탐색기 숨김(= files.exclude)
     "files.exclude": {
         "**/node_modules": true,
+        "**/.pnpm-store": true,            // 추가
+        "**/.vite": true,                  // 추가
         "**/artifacts": true,
         "**/cache": true,
         "**/out": true,
@@ -24,38 +31,69 @@
         "**/.next": true,
         "**/.turbo": true,
         "**/typechain-types": true,
-        "**/generated": true
+        "**/generated": true,
+        "**/broadcast": true               // 추가
     },
-    // 👀 파일 시스템 워처 부담 줄이기
+
+    // 👂 파일 시스템 워처 부담 줄이기(= files.watcherExclude)
     "files.watcherExclude": {
         "**/node_modules/**": true,
+        "**/.pnpm-store/**": true,         // 추가
+        "**/.vite/**": true,               // 추가
         "**/artifacts/**": true,
         "**/cache/**": true,
         "**/out/**": true,
         "**/build/**": true,
         "**/dist/**": true,
         "**/coverage/**": true,
+        "**/.next/**": true,
+        "**/.turbo/**": true,
+        "**/typechain-types/**": true,
+        "**/generated/**": true,
+        "**/broadcast/**": true,           // 추가
         "**/.git/objects/**": true,
         "**/.git/subtree-cache/**": true
     },
 
-    // 🧠 TypeScript 서버 부하 완화 (하드햇/타입체인 대규모 .d.ts 방어)
+    // 🧠 TypeScript 서버 부하 완화
     "typescript.tsserver.maxTsServerMemory": 4096,
     "typescript.tsserver.watchOptions": {
+        // Linux에선 상위 디렉토리 기반 감시 + 동적 폴링이 워처 폭주를 줄여줍니다.
         "watchFile": "useFsEventsOnParentDirectory",
-        "watchDirectory": "useFsEvents",
-        "fallbackPolling": "dynamicPriorityPolling"
+        "watchDirectory": "dynamicPriorityPolling",
+        "fallbackPolling": "dynamicPriority"
     },
+    "typescript.disableAutomaticTypeAcquisition": true, // 자동 타입 패키지 내려받기 차단
+    "typescript.tsserver.experimental.enableProjectDiagnostics": false, // 워크스페이스 전체 진단 비활성화
+    "typescript.tsdk": "node_modules/typescript/lib",   // 워크스페이스 TS 고정(버전 뒤섞임 방지)
+
+    // 💡 JS/TS 제안 과도 트리거 줄이기(선호 따라 조정)
+    "javascript.suggest.completeFunctionCalls": false,
 
     // 🧰 Git 부하 완화
     "git.autofetch": false,
+    "git.autorefresh": true,                 // 추가: 자동 새로고침 끄기
+    "git.untrackedChanges": "mixed",         // 추가: 대규모 repo에서 효과 큼
+    "scm.diffDecorations": "none",            // 추가: 에디터 내 diff 장식 제거
     "git.enableStatusBarSync": false,
     "git.ignoreLimitWarning": true,
 
-    // 🧹 ESLint/Prettier 등 확장 프로그램의 스캔 범위 축소
+    // 🧹 ESLint/Prettier 범위 최소화(현 설정 유지)
     "eslint.workingDirectories": [
-        { "directory": ".", "changeProcessCWD": true }, // 루트 포함
+        { "directory": ".", "changeProcessCWD": true },
         { "pattern": "projects/*" }
     ],
-    "eslint.validate": ["javascript", "typescript", "typescriptreact"]
+    "eslint.validate": ["javascript", "typescript", "typescriptreact"],
+
+    // 🗂️ 대형 폴더 자동 포커싱 방지
+    "explorer.autoReveal": false,
+
+    // 🖥️ 대용량 파일 로드시 메모리 상향(드문 케이스지만 안전망)
+    "files.maxMemoryForLargeFilesMB": 8192,
+
+    // 🧰 터미널 스크롤백 축소(종료 딜레이 완화에 도움)
+    "terminal.integrated.scrollback": 1000,
+
+    // 🔎 심볼릭 링크 추적 줄이기(있다면)
+    "search.followSymlinks": false
 }

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {VRFConsumerBase} from "@bisonai/orakl-contracts/src/v0.1/VRFConsumerBase.sol";
-import {IVRFCoordinator} from "@bisonai/orakl-contracts/src/v0.1/interfaces/IVRFCoordinator.sol";
+import {VRFConsumerBase} from "../lib/orakl/contracts/src/v0.1/VRFConsumerBase.sol";
+import {IVRFCoordinator} from "../lib/orakl/contracts/src/v0.1/interfaces/IVRFCoordinator.sol";
 
 interface IRandomnessReceiver {
     function onRandomnessReady(uint256 requestId, uint256 randomWord, bytes32 ctx) external;

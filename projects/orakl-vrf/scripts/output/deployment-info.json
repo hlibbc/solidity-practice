@@ -1,0 +1,14 @@
+{
+  "network": "kairos",
+  "chainId": 1001,
+  "deployer": "0x2663f93E3Ef4147BBF5AE4E14479bF092b560b78",
+  "vrfProxy": "0x01BE5282FB792C9501872b176Bd9958CD20aB123",
+  "vrfNft": "0x66D68d5f3BB956859B23315Dd4dbC4e536843ABB",
+  "params": {
+    "keyHash": "0xd9af33106d664a53cb9946df5cd81a30695f5b72224ee64e798b278af812779c",
+    "gasLimit": 500000,
+    "numWords": 1
+  },
+  "blockNumber": 198786265,
+  "timestamp": "2025-10-14T06:46:01.586Z"
+}

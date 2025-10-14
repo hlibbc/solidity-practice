@@ -16,6 +16,7 @@ contract VRFNft is IRandomnessReceiver {
     }
 
     mapping(uint256 => PendingMint) public pendingMint;
+    mapping(uint256 => uint256) public randMap;
 
     uint256 private _nextId = 1;
 
@@ -44,7 +45,8 @@ contract VRFNft is IRandomnessReceiver {
         uint256 tokenId = uint256(ctx); // 위에서 bytes32(tokenId)로 넣었음
 
         // 예시: 1~50
-        uint256 rand = (randomWord % 50) + 1;
+        uint256 rand = randomWord;
+        randMap[requestId] = rand;
 
         // 실제 민팅/메타데이터 결정 등 수행
         // _mint(p.to, tokenId);

@@ -27,3 +27,7 @@ node_modules/
 
 # Ignore remixd outputs
 **/.deps
+**/.states
+
+# Ignore cursor
+**/.cursor

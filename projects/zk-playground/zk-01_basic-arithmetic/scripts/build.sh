@@ -50,6 +50,15 @@ echo "==> Compile circuit: ${CIRCUIT}"
 # addition.circom → addition.r1cs(설계도), addition.wasm(계산기)
 "${CIRCOM_BIN}" "circuits/${CIRCUIT}.circom" --r1cs --wasm --sym -o "${OUTDIR}"
 
+
+### 엔트로피(비대화식 실행용). 환경변수로 덮어쓰기 가능
+# ${ENTROPY:-…}: 파라미터 확장 문법: ENTROPY가 unset이거나 빈 값이면 …를 대신 사용합니다. 이미 값이 있으면 그 값을 유지합니다.
+# $( … ): 명령 치환: 괄호 안의 명령을 실행한 출력 결과 문자열로 치환합니다.
+# head -c 64 /dev/urandom: 보안용 난수 소스 /dev/urandom에서 64바이트를 읽습니다(512비트).
+# | base64: 이 바이트들을 ASCII 안전 문자열(Base64)로 변환합니다. CLI 인수로 넘기기 편해집니다.
+# tr -d '\n': 엔트로피 생성 시 개행 제거
+ENTROPY="${ENTROPY:-$(head -c 64 /dev/urandom | base64 | tr -d '\n')}"
+
 # =============================================================================
 # Powers of Tau 설정 (Phase 1 & 2)
 # =============================================================================
@@ -68,7 +77,9 @@ if [[ ! -f "${PTAU_FINAL}" ]]; then
         # bn128 곡선, 2^12 크기로 새로운 PTAU 파일 생성
         ${SNARKJS_BIN} powersoftau new bn128 12 pot12_0000.ptau -v
         # 첫 번째 기여 수행 (랜덤성 추가)
-        ${SNARKJS_BIN} powersoftau contribute pot12_0000.ptau "${PHASE1}" --name="first contribution" -v
+        # ${SNARKJS_BIN} powersoftau contribute pot12_0000.ptau "${PHASE1}" --name="first contribution" -v -e "${ENTROPY}"
+        # snarkjs@0.7.5 호환: 엔트로피를 표준입력으로 전달
+        printf '%s\n' "${ENTROPY}" | ${SNARKJS_BIN} powersoftau contribute pot12_0000.ptau "${PHASE1}" -v
     fi
     echo "==> Prepare phase2 -> ${PTAU_FINAL}"
     # Phase 2 준비 (Groth16 프로토콜용)

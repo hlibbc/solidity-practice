@@ -5,7 +5,7 @@
     "build": "bash scripts/build.sh",
     "compile": "hardhat compile",
     "test": "hardhat test",
-    "deploy": "hardhat run scripts/deploy.js"
+    "verify": "hardhat run scripts/run_verify.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^3.0.0",

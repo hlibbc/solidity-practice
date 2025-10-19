@@ -1,0 +1,10 @@
+{
+  "depth": 20,
+  "secret": 12345,
+  "salt": 67890,
+  "pos": 1,
+  "others": [1, 2, 3, 4],
+  "verbose": true,
+  "check": true
+}
+

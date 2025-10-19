@@ -75,28 +75,49 @@ echo "==> Compile circuit: ${CIRCUIT}"
 ENTROPY="${ENTROPY:-$(head -c 64 /dev/urandom | base64 | tr -d '\n')}"
 
 # =============================================================================
-# Powers of Tau 설정 (Phase 1 & 2)
+# Powers of Tau 설정 (동적 power 산정)
 # =============================================================================
-# 1) phase1: new + contribute (최초 1회만 실행)
-# 2) phase2 준비: prepare phase2 -> pot12_final.ptau
-#
-# Powers of Tau (ptau): “공유 초기 재료(SRS: Structured Reference String)”.
-# Powers of Tau는 ZK-SNARK의 신뢰할 수 있는 설정을 위한 공개 매개변수입니다.
-# 이 과정은 한 번만 실행하면 되며, 여러 회로에서 재사용할 수 있습니다.
-# Phase1: 공유 초기 재료 만들기 (회로에 상관없이 쓸 수 있는 범용 SRS를 만드는 단계)
-# Phase2: 회로 맞춤 재료로 변환 (Phase1에서 생성한 범용 SRS를 특정 회로에 맞게 변환해서, 그 회로의 증명키/검증키(zkey)를 만드는 단계)
-# .... Phase1에서 생성한 범용 SRS를 특정 회로에 맞게 변환 -> phase1의 ptau를 특정회로(R1CS)에 결합
-if [[ ! -f "${PTAU_FINAL}" ]]; then
-    if [[ ! -f "${PHASE1}" ]]; then
-        echo "==> Powers of Tau (phase1) - 최초 실행"
-        # bn128 곡선, 2^12 크기로 새로운 PTAU 파일 생성
-        ${SNARKJS_BIN} powersoftau new bn128 12 pot12_0000.ptau -v
-        # 첫 번째 기여 수행 (랜덤성 추가): snarkjs@0.7.5 호환: 엔트로피를 표준입력으로 전달
-        printf '%s\n' "${ENTROPY}" | ${SNARKJS_BIN} powersoftau contribute pot12_0000.ptau "${PHASE1}" -v
-    fi
-    echo "==> Prepare phase2 -> ${PTAU_FINAL}"
-    # Phase 2 준비 (Groth16 프로토콜용)
-    ${SNARKJS_BIN} powersoftau prepare phase2 "${PHASE1}" "${PTAU_FINAL}"
+# R1CS 제약식 수를 기반으로 필요한 power를 계산한 뒤, 해당 PTAU를 사용합니다.
+R1CS_INFO="$(${SNARKJS_BIN} r1cs info "${OUTDIR}/${CIRCUIT}.r1cs" || true)"
+CONSTRAINTS="$(printf '%s\n' "${R1CS_INFO}" \
+  | awk '/Constraints/ {for(i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/){print $i; exit}}')"
+if ! [[ "${CONSTRAINTS}" =~ ^[0-9]+$ ]]; then
+    echo "⚠️ Could not parse constraints from snarkjs output. Falling back to 6000."
+    CONSTRAINTS=6000
+fi
+REQ=$(( CONSTRAINTS * 2 ))
+
+# ceil(log2(REQ)) 계산
+needed_power=0
+tmp=$(( REQ - 1 ))
+while [ $tmp -gt 0 ]; do
+    tmp=$(( tmp >> 1 ))
+    needed_power=$(( needed_power + 1 ))
+done
+[ $needed_power -lt 14 ] && needed_power=14
+
+PTAU_DIR="build/pot"
+mkdir -p "${PTAU_DIR}"
+PTAU="${PTAU_DIR}/pot${needed_power}_final.ptau"
+
+# 기존 PTAU의 power 확인(있다면)
+have_power=""
+if [ -f "${PTAU}" ]; then
+    have_power=$(${SNARKJS_BIN} powersoftau verify "${PTAU}" 2>/dev/null | awk '/power:/ {print $2; exit}')
+fi
+
+echo "• circuit constraints: ${CONSTRAINTS}  → required power: ${needed_power}"
+echo "• using PTAU: ${PTAU}"
+[ -n "${have_power}" ] && echo "  detected PTAU power: ${have_power}"
+
+# 없거나 파워가 부족하면 새로 생성
+if [ ! -f "${PTAU}" ] || [ -z "${have_power}" ] || [ "${have_power}" -lt "${needed_power}" ]; then
+    echo "==> (re)creating PTAU (power=${needed_power})"
+    ${SNARKJS_BIN} powersoftau new bn128 ${needed_power} "${PTAU_DIR}/pot${needed_power}_0000.ptau" -v
+    # 첫 번째 기여: 엔트로피를 표준입력으로 전달(snarkjs@0.7.5 호환)
+    printf '%s\n' "${ENTROPY}" | ${SNARKJS_BIN} powersoftau contribute "${PTAU_DIR}/pot${needed_power}_0000.ptau" \
+                                                      "${PTAU_DIR}/pot${needed_power}_0001.ptau" -v
+    ${SNARKJS_BIN} powersoftau prepare phase2 "${PTAU_DIR}/pot${needed_power}_0001.ptau" "${PTAU}"
 fi
 
 # =============================================================================
@@ -107,7 +128,7 @@ echo "==> Groth16 setup"
 # R1CS: 회로를 수학적 제약식으로 바꾼 설계도, circom 컴파일 결과로 *.r1cs가 나옴
 # Groth16은 R1CS를 입력으로 사용해 KEY를 만든다.
 # zkey: “이 회로 전용의 증명키/검증키(묶음)”.
-${SNARKJS_BIN} groth16 setup "${OUTDIR}/${CIRCUIT}.r1cs" "${PTAU_FINAL}" "${OUTDIR}/${CIRCUIT}_0000.zkey"
+${SNARKJS_BIN} groth16 setup "${OUTDIR}/${CIRCUIT}.r1cs" "${PTAU}" "${OUTDIR}/${CIRCUIT}_0000.zkey"
 
 echo "==> Export verification key"
 # 검증을 위한 공개키 추출

@@ -1,36 +1,45 @@
 // scripts/make-merkle-inputs.js  (CJS, fast + with logs, 4-space indent)
 // 요구: poseidon-lite >= 0.3.x  (poseidon2 사용)
 //
-// 사용 예시 1) 리프 직접 지정
-//   node scripts/make-merkle-inputs.js --depth 20 --leaves 11,22,33,44 --index 2
-//
-// 사용 예시 2) (secret,salt) 커밋을 특정 위치에 주입
-//   node scripts/make-merkle-inputs.js --depth 20 --secret 12345 --salt 67890 --pos 1 --others 11,22,33,44
-//
+// 입력: JSON 설정 파일 사용
+//   inputs/make-merkle-inputs.json 에 인자를 정의합니다. 예:
+//   {
+//     "depth": 20,
+//     "secret": 12345,
+//     "salt": 67890,
+//     "pos": 1,
+//     "others": [1,2,3,4],
+//     "verbose": true,
+//     "check": true
+//   }
 // 출력: inputs/merkle_inclusion.input.json
 
 const fs = require("fs");
 const path = require("path");
 const { poseidon2 } = require("poseidon-lite");
 
-function parseCLI() {
-    const args = process.argv.slice(2);
-    const opts = { depth: 20, verbose: true, check: true };
-    for (let i = 0; i < args.length; i++) {
-        const a = args[i];
-        const next = args[i + 1];
-        if (a === "--leaves") opts.leaves = (next || "").split(",").filter(Boolean);
-        if (a === "--index") opts.index = parseInt(next, 10);
-        if (a === "--depth") opts.depth = parseInt(next, 10);
-        if (a === "--secret") opts.secret = next;
-        if (a === "--salt") opts.salt = next;
-        if (a === "--pos") opts.pos = parseInt(next, 10);
-        if (a === "--others") opts.others = (next || "").split(",").filter(Boolean);
-        if (a === "--quiet") opts.verbose = false;
-        if (a === "--no-check") opts.check = false;
+function readConfigJSON() {
+    const ROOT = path.resolve(__dirname, "..");
+    const cfgPath = path.join(ROOT, "inputs", "make-merkle-inputs.json");
+    try {
+        if (!fs.existsSync(cfgPath)) return null;
+        const raw = fs.readFileSync(cfgPath, "utf8").trim();
+        if (!raw) return null;
+        const cfg = JSON.parse(raw);
+        return cfg && Object.keys(cfg).length ? cfg : null;
+    } catch (_) {
+        return null;
     }
-    return opts;
 }
+
+function normalizeArray(v) {
+    if (v === undefined || v === null) return undefined;
+    if (Array.isArray(v)) return v.map(String);
+    if (typeof v === "string") return v.split(",").filter(Boolean).map(String);
+    return [String(v)];
+}
+
+// CLI 지원 제거: JSON 설정만 허용
 
 function assert(cond, msg) {
     if (!cond) throw new Error(msg);
@@ -68,37 +77,53 @@ function reconstructRootFromPath(leaf, pathElements, pathIndices) {
 (function main() {
     const t0 = Date.now();
     try {
-        const { leaves, index, depth, secret, salt, pos = 0, others, verbose, check } = parseCLI();
+        const cfg = readConfigJSON();
+        if (!cfg) throw new Error("Missing inputs/make-merkle-inputs.json or empty config.");
+        const opts = { depth: 20, verbose: true, check: true };
+        if (cfg.depth !== undefined) opts.depth = Number(cfg.depth);
+        if (cfg.index !== undefined) opts.index = Number(cfg.index);
+        if (cfg.secret !== undefined) opts.secret = String(cfg.secret);
+        if (cfg.salt !== undefined) opts.salt = String(cfg.salt);
+        if (cfg.pos !== undefined) opts.pos = Number(cfg.pos);
+        const leaves = normalizeArray(cfg.leaves);
+        const others = normalizeArray(cfg.others);
+        if (leaves) opts.leaves = leaves;
+        if (others) opts.others = others;
+        if (cfg.verbose === false) opts.verbose = false;
+        if (cfg.check === false) opts.check = false;
+
+        const { index, depth, secret, salt, pos = 0, verbose, check } = opts;
+        let { leaves: leavesOpt, others: othersOpt } = opts;
         if (verbose) {
             console.log("▶ start make-merkle-inputs");
-            console.log("  • params:", { depth, hasLeaves: !!leaves?.length, hasSecretSalt: secret !== undefined, pos });
+            console.log("  • params:", { depth, hasLeaves: !!leavesOpt?.length, hasSecretSalt: secret !== undefined, pos });
         }
 
         // 1) 리프 준비
         let leafValues = [];
         if (secret !== undefined && salt !== undefined) {
             const commit = poseidon2([BigInt(secret), BigInt(salt)]);
-            if (!others || others.length === 0) {
+            if (!othersOpt || othersOpt.length === 0) {
                 leafValues = [];
             } else {
-                leafValues = others.map((v) => BigInt(v));
+                leafValues = othersOpt.map((v) => BigInt(v));
             }
-            assert(pos >= 0 && pos <= leafValues.length, `--pos ${pos} out of range (others length=${leafValues.length})`);
+            assert(pos >= 0 && pos <= leafValues.length, `pos ${pos} out of range (others length=${leafValues.length})`);
             leafValues.splice(pos, 0, commit);
-        } else if (leaves && leaves.length) {
-            leafValues = leaves.map((v) => BigInt(v));
+        } else if (leavesOpt && leavesOpt.length) {
+            leafValues = leavesOpt.map((v) => BigInt(v));
         } else {
-            throw new Error("Provide either --leaves OR (--secret --salt [--pos] --others).");
+            throw new Error("Provide either leaves OR (secret, salt[, pos], others) in make-merkle-inputs.json.");
         }
 
         assert(leafValues.length >= 1, "Need at least 1 leaf.");
         const targetIndex = (index !== undefined) ? index : pos;
         assert(0 <= targetIndex && targetIndex < leafValues.length,
-            `--index ${targetIndex} out of range [0, ${leafValues.length - 1}]`);
+            `index ${targetIndex} out of range [0, ${leafValues.length - 1}]`);
 
         if (verbose) {
             console.log(`  • leaves count: ${leafValues.length}`);
-            console.log(`  • target index: ${targetIndex} (index ${index === undefined ? "(auto from --pos)" : "(explicit)"} )`);
+            console.log(`  • target index: ${targetIndex} (${index === undefined ? "auto from pos" : "explicit"})`);
         }
 
         // 2) 최소 깊이로 트리 구성 (2^depth0 >= #leaves)

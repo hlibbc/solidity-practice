@@ -9,8 +9,23 @@
 # 예시: ./build.sh addition
 # =============================================================================
 
-# 에러 발생 시 즉시 종료, 정의되지 않은 변수 사용 시 에러, 파이프라인 에러 시 즉시 종료
+### 에러 발생 시 즉시 종료, 정의되지 않은 변수 사용 시 에러, 파이프라인 에러 시 즉시 종료
+# -e (errexit): 명령이 0이 아닌 종료 코드를 반환하면 즉시 스크립트를 종료
+# -u (nounset): 정의되지 않은 변수를 참조하면 오류로 간주하고 종료
+# -o pipefail (pipefail): 파이프라인(a | b | c)에서 어느 한 단계라도 실패하면 전체가 실패로 간주
 set -euo pipefail
+
+echo "ARGS 분석 **********"
+echo "- 스크립트 이름: $0"
+echo "- 총 아규먼트 개수: $#"
+echo "*******************"
+
+i=1
+for arg in "$@"; do
+    printf '- 아규먼트%u: %s\n' "$i" "$arg"
+    i=$((i+1))
+done
+echo "*******************"
 
 # pnpm run build -- addition 처럼 들어와도 안전하게 처리
 # pnpm이 -- 구분자를 추가하는 경우를 대비한 안전장치
@@ -42,8 +57,8 @@ echo "==> Compile circuit: ${CIRCUIT}"
 # =============================================================================
 # circom으로 회로 컴파일: R1CS, WASM, 심볼 테이블 생성
 # =============================================================================
-# R1CS: “수학식으로 바꾼 회로 설계도”.
-# WASM: “입력 넣으면 계산(증거재료)을 만들어주는 실행파일”.
+# R1CS: “수학식으로 바꾼 회로 설계도”. (정적 정의)
+# WASM: “입력값을 받아 witness 생성해주는 계산기”. (동적 실행)
 # SYM: 디버깅용 심볼 테이블
 #
 # Circom 컴파일을 통해..
@@ -76,9 +91,7 @@ if [[ ! -f "${PTAU_FINAL}" ]]; then
         echo "==> Powers of Tau (phase1) - 최초 실행"
         # bn128 곡선, 2^12 크기로 새로운 PTAU 파일 생성
         ${SNARKJS_BIN} powersoftau new bn128 12 pot12_0000.ptau -v
-        # 첫 번째 기여 수행 (랜덤성 추가)
-        # ${SNARKJS_BIN} powersoftau contribute pot12_0000.ptau "${PHASE1}" --name="first contribution" -v -e "${ENTROPY}"
-        # snarkjs@0.7.5 호환: 엔트로피를 표준입력으로 전달
+        # 첫 번째 기여 수행 (랜덤성 추가): snarkjs@0.7.5 호환: 엔트로피를 표준입력으로 전달
         printf '%s\n' "${ENTROPY}" | ${SNARKJS_BIN} powersoftau contribute pot12_0000.ptau "${PHASE1}" -v
     fi
     echo "==> Prepare phase2 -> ${PTAU_FINAL}"
@@ -158,3 +171,4 @@ echo "==> Export Solidity verifier"
 ${SNARKJS_BIN} zkey export solidityverifier "${OUTDIR}/${CIRCUIT}_0000.zkey" "contracts/${CIRCUIT}_Verifier.sol"
 
 echo "OK: ${CIRCUIT} build complete -> contracts/${CIRCUIT}_Verifier.sol"
+

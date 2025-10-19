@@ -4,7 +4,10 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
-    "deploy": "hardhat run scripts/deploy.js"
+    "build": "bash scripts/build.sh",
+    "make-merkle-inputs": "node scripts/make-merkle-inputs.js",
+    "deploy": "hardhat run scripts/deploy.js",
+    "claim": "hardhat run scripts/claim.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^3.0.0",

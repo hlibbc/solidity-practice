@@ -57,76 +57,16 @@ npm install
 
 ```bash
 # 기본 회로 (addition) 빌드
-pnpm run build
+pnpm -F zk-01_basic_arithmetic run build
 
 # 특정 회로 빌드
-pnpm run build multiplication
-pnpm run build division
-pnpm run build subtraction
+pnpm -F zk-01_basic_arithmetic run build multiplication
+pnpm -F zk-01_basic_arithmetic run build division
+pnpm -F zk-01_basic_arithmetic run build subtraction
 
 # 또는 직접 스크립트 실행
 bash scripts/build.sh [circuit_name]
 ```
-
-## 📚 구현된 회로들
-
-### 1. Addition (덧셈)
-```circom
-template Addition() {
-    signal input a;
-    signal input b;
-    signal output c;
-    
-    c <== a + b;
-}
-```
-- **입력**: `a`, `b` (두 정수)
-- **출력**: `c = a + b`
-- **용도**: 기본 덧셈 연산의 ZK 증명
-
-### 2. Subtraction (뺄셈)
-```circom
-template Subtraction() {
-    signal input a;
-    signal input b;
-    signal output c;
-    
-    c <== a - b;
-}
-```
-- **입력**: `a`, `b` (두 정수)
-- **출력**: `c = a - b`
-- **용도**: 기본 뺄셈 연산의 ZK 증명
-
-### 3. Multiplication (곱셈)
-```circom
-template Multiplication() {
-    signal input a;
-    signal input b;
-    signal output c;
-    
-    c <== a * b;
-}
-```
-- **입력**: `a`, `b` (두 정수)
-- **출력**: `c = a * b`
-- **용도**: 기본 곱셈 연산의 ZK 증명
-
-### 4. Division (나눗셈)
-```circom
-template Division() {
-    signal input a;
-    signal input b;
-    signal input q;
-    signal input r;
-    signal output valid;
-    
-    valid <== (a == b * q + r) && (r < b);
-}
-```
-- **입력**: `a` (피제수), `b` (제수), `q` (몫), `r` (나머지)
-- **출력**: `valid` (나눗셈이 올바른지 여부)
-- **용도**: 나눗셈 연산의 정확성 검증
 
 ## 🔧 빌드 과정
 
@@ -143,7 +83,7 @@ template Division() {
 
 ### Hardhat 테스트
 ```bash
-pnpm run test
+pnpm F zk-01_basic_arithmetic run test
 ```
 
 ### Foundry 테스트

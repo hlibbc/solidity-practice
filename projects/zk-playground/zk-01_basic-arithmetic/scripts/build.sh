@@ -114,9 +114,12 @@ echo "• using PTAU: ${PTAU}"
 if [ ! -f "${PTAU}" ] || [ -z "${have_power}" ] || [ "${have_power}" -lt "${needed_power}" ]; then
     echo "==> (re)creating PTAU (power=${needed_power})"
     ${SNARKJS_BIN} powersoftau new bn128 ${needed_power} "${PTAU_DIR}/pot${needed_power}_0000.ptau" -v
-    # 첫 번째 기여: 엔트로피를 표준입력으로 전달(snarkjs@0.7.5 호환)
-    printf '%s\n' "${ENTROPY}" | ${SNARKJS_BIN} powersoftau contribute "${PTAU_DIR}/pot${needed_power}_0000.ptau" \
-                                                      "${PTAU_DIR}/pot${needed_power}_0001.ptau" -v
+    # 첫 번째 기여: -e 옵션으로 엔트로피 전달
+    ${SNARKJS_BIN} powersoftau contribute "${PTAU_DIR}/pot${needed_power}_0000.ptau" \
+                                              "${PTAU_DIR}/pot${needed_power}_0001.ptau" --name="first" -e="${ENTROPY}" -v
+    # (참고) stdin 파이핑 방식 (구버전 호환)
+    # printf '%s\n' "${ENTROPY}" | ${SNARKJS_BIN} powersoftau contribute "${PTAU_DIR}/pot${needed_power}_0000.ptau" \
+    #                                                   "${PTAU_DIR}/pot${needed_power}_0001.ptau" -v
     ${SNARKJS_BIN} powersoftau prepare phase2 "${PTAU_DIR}/pot${needed_power}_0001.ptau" "${PTAU}"
 fi
 

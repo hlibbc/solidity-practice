@@ -161,3 +161,9 @@
 [submodule "projects/orakl-vrf/lib/orakl"]
 	path = projects/orakl-vrf/lib/orakl
 	url = https://github.com/Bisonai/orakl
+[submodule "projects/eip-6551/lib/forge-std"]
+	path = projects/eip-6551/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/eip-6551/lib/openzeppelin-contracts"]
+	path = projects/eip-6551/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

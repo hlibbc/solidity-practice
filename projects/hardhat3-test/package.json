@@ -8,9 +8,12 @@
         "build": "hardhat build",
         "test": "hardhat test",
         "typecheck": "tsc --noEmit",
-        "deploy": "hardhat ignition deploy ignition/modules/Example.ts",
-        "deploy:dev": "hardhat ignition deploy ignition/modules/Example.ts --network development",
-        "deploy:reset": "hardhat ignition deploy ignition/modules/Example.ts --network development --reset"
+        "deploy:Example": "hardhat ignition deploy ignition/modules/Example.ts",
+        "deploy:Example:dev": "hardhat ignition deploy ignition/modules/Example.ts --network development",
+        "deploy:Example:reset": "hardhat ignition deploy ignition/modules/Example.ts --network development --reset",
+        "deploy:MyToken": "hardhat ignition deploy ignition/modules/MyToken.ts --parameters ignition/parameters.json",
+        "deploy:MyToken:dev": "hardhat ignition deploy ignition/modules/MyToken.ts --network development --parameters ignition/parameters.json",
+        "deploy:MyToken:reset": "hardhat ignition deploy ignition/modules/MyToken.ts --network development --reset --parameters ignition/parameters.json"
     },
     "devDependencies": {
         "hardhat": "^3.0.4",

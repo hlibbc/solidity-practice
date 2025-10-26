@@ -1,2 +1,2 @@
 # Hardhat Ignition - ignore local ephemeral deployments
-ignition/deployments/chain-31337/**
+ignition/deployments/**

@@ -13,7 +13,10 @@
         "deploy:Example:reset": "hardhat ignition deploy ignition/modules/Example.ts --network development --reset",
         "deploy:MyToken": "hardhat ignition deploy ignition/modules/MyToken.ts --parameters ignition/parameters.json",
         "deploy:MyToken:dev": "hardhat ignition deploy ignition/modules/MyToken.ts --network development --parameters ignition/parameters.json",
-        "deploy:MyToken:reset": "hardhat ignition deploy ignition/modules/MyToken.ts --network development --reset --parameters ignition/parameters.json"
+        "deploy:MyToken:reset": "hardhat ignition deploy ignition/modules/MyToken.ts --network development --reset --parameters ignition/parameters.json",
+        "deploy:App": "hardhat ignition deploy ignition/modules/App.ts --network localhost --parameters ignition/parameters.json --deployment-id app",
+        "deploy:App:dev": "hardhat ignition deploy ignition/modules/App.ts --network development --parameters ignition/parameters.json --deployment-id app",
+        "deploy:App:reset": "hardhat ignition deploy ignition/modules/App.ts --network development --reset --parameters ignition/parameters.json --deployment-id app"
     },
     "devDependencies": {
         "hardhat": "^3.0.4",

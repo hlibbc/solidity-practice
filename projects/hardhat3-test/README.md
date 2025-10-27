@@ -14,7 +14,6 @@ pnpm -F hardhat3-test hardhat node  # 로컬 노드 실행
 - 스크립트(권장): `package.json`에 준비된 스크립트를 사용합니다.
 
 ```bash
-pnpm -F hardhat3-test run deploy:Example
 pnpm -F hardhat3-test run deploy:MyToken
 pnpm -F hardhat3-test run deploy:App
 ```
@@ -78,3 +77,80 @@ pnpm -F hardhat3-test run deploy:App:reset
 필요 시 `--reset` 옵션을 직접 명령에 추가해도 됩니다.
 
 
+### Prettier 사용법 (코드 포맷)
+
+- 설치 없이 1회 실행:
+
+```bash
+pnpm dlx prettier --write 'ignition/modules/*.ts' --tab-width 4 --use-tabs false
+```
+
+- 워크스페이스에서 패키지 필터로 실행:
+
+```bash
+pnpm -F hardhat3-test exec prettier --write 'ignition/modules/*.ts' --tab-width 4 --use-tabs false
+```
+
+- 프로젝트에 Prettier를 개발 의존성으로 설치 후 실행:
+
+```bash
+cd projects/hardhat3-test
+pnpm add -D prettier
+pnpm exec prettier --write 'ignition/modules/*.ts' --tab-width 4 --use-tabs false
+```
+
+- zsh 글롭 주의사항: `*.ts` 패턴은 셸이 먼저 확장하므로, 반드시 따옴표로 감싸거나 `noglob`을 사용하세요.
+
+```bash
+# 따옴표로 감싸기(권장)
+pnpm -F hardhat3-test exec prettier --write 'ignition/modules/*.ts' --tab-width 4 --use-tabs false
+
+# 혹은 일시적으로 글롭 비활성화
+noglob pnpm -F hardhat3-test exec prettier --write ignition/modules/*.ts --tab-width 4 --use-tabs false
+```
+
+- 특정 파일만 지정해서 실행 예시:
+
+```bash
+pnpm -F hardhat3-test exec prettier --write \
+  ignition/modules/App.ts \
+  ignition/modules/LibAndUser.ts \
+  ignition/modules/MyToken.ts \
+  --tab-width 4 --use-tabs false
+```
+
+
+### Hardhat 콘솔로 배포/호출 (로컬 노드 권장)
+
+- 노드/콘솔 실행
+
+```bash
+pnpm -F hardhat3-test exec hardhat node
+# 새 터미널
+pnpm -F hardhat3-test exec hardhat console --network localhost
+```
+
+- 콘솔 안(Ethers v6 JsonRpcProvider 사용)
+
+```js
+const { ethers: E } = await import("ethers");
+const provider = new E.JsonRpcProvider("http://127.0.0.1:8545");
+const signer = await provider.getSigner(0);
+
+const artifact = await hre.artifacts.readArtifact("MyToken");
+const factory = new E.ContractFactory(artifact.abi, artifact.bytecode, signer);
+const tk = await factory.deploy("MyToken","MTK");
+await tk.waitForDeployment();
+await tk.getAddress();     // 배포 주소
+await tk.name();           // 읽기 호출
+```
+
+- 이미 배포된 컨트랙트에 읽기 전용으로 연결
+
+```js
+const token = new E.Contract("0x...배포주소", artifact.abi, provider);
+await token.name();
+```
+
+- 참고
+  - 인메모리 네트워크(`--network hardhat`)에서 `hre.ethers`/`hre.viem` 확장이 환경에 따라 주입되지 않는 경우가 있어, 로컬 노드 + JsonRpcProvider 경로를 권장합니다.

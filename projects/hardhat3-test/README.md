@@ -37,8 +37,8 @@ pnpm -F hardhat3-test hardhat ignition deploy ignition/modules/App.ts \
   - 특징: 같은 체인에서 재배포하면 이 파일이 “최근 배포”로 덮어쓰기 됩니다.
 
 - 배포 ID 사용 시(`--deployment-id <id>`):
-  - 경로: `ignition/deployments/chain-<chainid>/<id>/deployed_addresses.json`
-  - 저널: `ignition/deployments/chain-<chainid>/<id>/journal.jsonl`
+  - 경로: `ignition/deployments/<id>/deployed_addresses.json`
+  - 저널: `ignition/deployments/<id>/journal.jsonl`
   - 장점: 배포 결과를 컨텍스트별(ID별)로 분리 보관. 루트 최신 파일은 계속 갱신됩니다.
 
 예시:
@@ -47,6 +47,7 @@ pnpm -F hardhat3-test hardhat ignition deploy ignition/modules/App.ts \
 # 배포 결과를 app ID로 분리 보관
 pnpm -F hardhat3-test hardhat ignition deploy ignition/modules/App.ts \
   --network localhost --parameters ignition/parameters.json --deployment-id app
+# → 결과 파일: ignition/deployments/app/deployed_addresses.json
 ```
 
 ### 여러 컨트랙트를 배포하는 방법

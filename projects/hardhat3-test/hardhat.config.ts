@@ -1,10 +1,11 @@
 import { configVariable, HardhatUserConfig } from "hardhat/config";
-import toolboxViem from "@nomicfoundation/hardhat-toolbox-viem";
-import hardhatKeystore from "@nomicfoundation/hardhat-keystore";
-import hardhatVerify from "@nomicfoundation/hardhat-verify";
+import "@nomicfoundation/hardhat-toolbox-viem";
+import "@nomicfoundation/hardhat-keystore";
+import "@nomicfoundation/hardhat-verify";
+// import "@nomicfoundation/hardhat-viem";
+// import "@nomicfoundation/hardhat-ethers";
 
 const config: HardhatUserConfig = {
-  plugins: [toolboxViem, hardhatKeystore, hardhatVerify],
   solidity: {
     version: "0.8.28",
     settings: {

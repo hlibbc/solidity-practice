@@ -8,22 +8,29 @@
         "build": "hardhat build",
         "test": "hardhat test",
         "typecheck": "tsc --noEmit",
-        "deploy": "hardhat ignition deploy ignition/modules/Example.ts",
-        "deploy:dev": "hardhat ignition deploy ignition/modules/Example.ts --network development",
-        "deploy:reset": "hardhat ignition deploy ignition/modules/Example.ts --network development --reset"
+        "deploy:MyToken": "hardhat ignition deploy ignition/modules/MyToken.ts --parameters ignition/parameters.json",
+        "deploy:MyToken:dev": "hardhat ignition deploy ignition/modules/MyToken.ts --network development --parameters ignition/parameters.json",
+        "deploy:MyToken:reset": "hardhat ignition deploy ignition/modules/MyToken.ts --network development --reset --parameters ignition/parameters.json",
+        "deploy:App": "hardhat ignition deploy ignition/modules/App.ts --network localhost --parameters ignition/parameters.json --deployment-id app",
+        "deploy:App:dev": "hardhat ignition deploy ignition/modules/App.ts --network development --parameters ignition/parameters.json --deployment-id app",
+        "deploy:App:reset": "hardhat ignition deploy ignition/modules/App.ts --network development --reset --parameters ignition/parameters.json --deployment-id app"
     },
     "devDependencies": {
-        "hardhat": "^3.0.4",
-        "@nomicfoundation/hardhat-toolbox-viem": "^5.0.0",
-        "@nomicfoundation/hardhat-network-helpers": "^3.0.0",
+        "@nomicfoundation/hardhat-ethers": "^4.0.2",
         "@nomicfoundation/hardhat-ignition": "^3.0.2",
         "@nomicfoundation/hardhat-ignition-viem": "^3.0.2",
-        "@nomicfoundation/hardhat-verify": "^3.0.0",
         "@nomicfoundation/hardhat-keystore": "^3.0.0",
-        "viem": "^2.37.3",
-        "typescript": "~5.8.0",
-        "@types/node": "^22.18.1",
+        "@nomicfoundation/hardhat-network-helpers": "^3.0.0",
+        "@nomicfoundation/hardhat-toolbox-viem": "^5.0.0",
+        "@nomicfoundation/hardhat-verify": "^3.0.0",
+        "@nomicfoundation/hardhat-viem": "^3.0.0",
         "@openzeppelin/contracts": "^5.4.0",
-        "dotenv": "^17.2.2"
+        "@types/node": "^22.18.1",
+        "dotenv": "^17.2.2",
+        "ethers": "^6.15.0",
+        "hardhat": "^3.0.4",
+        "prettier": "^3.6.2",
+        "typescript": "~5.8.0",
+        "viem": "^2.37.5"
     }
 }

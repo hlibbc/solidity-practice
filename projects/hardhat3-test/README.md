@@ -25,7 +25,7 @@ pnpm -F hardhat3-test run deploy:App
 pnpm -F hardhat3-test hardhat ignition deploy ignition/modules/MyToken.ts \
   --network localhost --parameters ignition/parameters.json
 
-# 여러 컨트랙트를 한 번에(App 모듈)
+# 여러 컨트랙트를 한 번에
 pnpm -F hardhat3-test hardhat ignition deploy ignition/modules/App.ts \
   --network localhost --parameters ignition/parameters.json
 ```

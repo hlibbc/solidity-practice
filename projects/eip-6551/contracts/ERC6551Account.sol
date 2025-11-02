@@ -114,9 +114,11 @@ contract ERC6551Account is IERC165, IERC1271, IERC6551Account, IERC6551Executabl
         public view virtual 
         returns (uint256, address, uint256) 
     {
+        // 런타임 코드의 마지막 96바이트를 footer로 간주하여 읽는다.
         bytes memory footer = new bytes(0x60);
         assembly {
-            extcodecopy(address(), add(footer, 0x20), 0x4d, 0x60)
+            let size := extcodesize(address())
+            extcodecopy(address(), add(footer, 0x20), sub(size, 0x60), 0x60)
         }
         return abi.decode(footer, (uint256, address, uint256));
     }

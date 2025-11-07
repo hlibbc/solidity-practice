@@ -29,7 +29,7 @@ contract ERC6551Registry is IERC6551Registry {
      * @param chainId 대상 체인 ID(footer에 저장)
      * @param tokenContract 바인딩할 ERC721 컨트랙트 주소(footer에 저장)
      * @param tokenId 바인딩할 토큰 ID(footer에 저장)
-     * @return account 생성되었거나 이미 존재하는 TBA 주소
+     * @return predicted 생성되었거나 이미 존재하는 TBA 주소
      */
     function createAccount(
         address implementation,
@@ -37,10 +37,10 @@ contract ERC6551Registry is IERC6551Registry {
         uint256 chainId,
         address tokenContract,
         uint256 tokenId
-    ) external returns (address account) {
+    ) external returns (address predicted) {
         bytes memory initCode = _buildInitCode(implementation, chainId, tokenContract, tokenId);
-        account = _computeAddress(salt, initCode);
-        if (account.code.length == 0) {
+        predicted = _computeAddress(salt, initCode);
+        if (predicted.code.length == 0) {
             address deployed;
             assembly {
                 let ptr := add(initCode, 0x20)

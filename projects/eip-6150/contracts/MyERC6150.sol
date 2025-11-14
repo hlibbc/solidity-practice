@@ -10,6 +10,31 @@ pragma solidity ^0.8.20;
  *  - OZ v5.x의 내부 API에 맞춘 래퍼 함수를 포함합니다(`_exists6150`, `_isApprovedOrOwner6150`).
  *  - 저장소 설계: `_parent`, `_children`, `_childIndex`로 계층 구조를 추적합니다.
  *  - 이벤트: 인터페이스에 정의된 `Minted`, `ParentTransferred`를 사용해 상위 호환을 유지합니다.
+ *
+ *  [설계]
+ *  - Core: 부모/자식/루트/리프 관계를 유지하는 기본 뷰를 제공합니다.
+ *  - Enumerable: 특정 부모 하위의 자식 개수/인덱스 접근을 제공합니다.
+ *  - Burnable: 리프 토큰만 안전하게 소각할 수 있습니다(연결 정리 포함).
+ *  - ParentTransferable: 부모 변경(루트 승격 포함) 기능을 제공합니다.
+ *  - AccessControl(뷰): 토큰별 관리자 권한 조회, 발행/소각 가능 여부 조회를 제공합니다.
+ *
+ *  [사용법]
+ *  - 루트 발행: `mintRoot(to)` (컨트랙트 소유자 또는 허용된 루트 민터만)
+ *  - 자식 발행: `mintChild(to, parentId)` (해당 부모의 소유자 또는 관리자만)
+ *  - 부모 변경: `transferParent(newParentId, tokenId)` (권한 필요, 순환/자기부모 금지)
+ *  - 소각: `safeBurn(tokenId)` 또는 `safeBatchBurn(tokenIds)` (리프만 허용)
+ *
+ *  [권한]
+ *  - 루트 발행 권한은 컨트랙트 소유자 또는 `setRootMinter`로 허용된 계정에 부여됩니다.
+ *  - 특정 토큰의 관리자 권한은 토큰 소유자 또는 컨트랙트 소유자가 `setTokenAdmin`으로 위임할 수 있습니다.
+ *
+ *  [보안]
+ *  - 부모 변경 시 순환 참조 방지(`_isDescendant`), 자기 자신을 부모로 지정 금지, 존재성 검사를 수행합니다.
+ *  - 소각은 리프에 한정되며, 권한 검사를 통해 안전하게 처리됩니다.
+ *
+ *  [가스/제한]
+ *  - 자식 목록 `_children[parent]`은 동적 배열로, 빈번한 삽입/삭제 시 가스 비용이 증가할 수 있습니다.
+ *  - 삭제는 스왑-팝을 사용하여 O(1)로 처리하지만, 자식의 순서는 보장되지 않습니다.
  */
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";

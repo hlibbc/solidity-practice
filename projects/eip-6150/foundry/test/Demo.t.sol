@@ -4,12 +4,28 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import {MyERC6150} from "../../contracts/MyERC6150.sol";
 
+/**
+ * @title RevisionNFT6150Test - ERC-6150 기능 테스트
+ * @notice
+ *  - `MyERC6150`의 핵심 기능(루트/자식 민트, 부모 변경, 소각, 접근제어, 열거/조회)을 순차적으로 검증합니다.
+ *  - 트리 구조 제약(순환 방지, self-parent 금지), 리프 전용 소각 규칙 등을 포함해 행동/에러 케이스를 함께 확인합니다.
+ * @dev
+ *  - Foundry `Test`를 상속하여 `vm` 헬퍼를 사용합니다.
+ *  - 계정은 `makeAddr`로 가독성 있게 생성하고, 필요한 경우 `vm.prank`/`vm.startPrank`로 msg.sender를 전환합니다.
+ *  - 각 테스트는 독립적으로 수행되며, `setUp()`에서 공통 배포/권한 설정을 초기화합니다.
+ */
 contract RevisionNFT6150Test is Test {
     MyERC6150 internal rev;
     address internal owner;
     address internal alice;
     address internal bob;
 
+    /**
+     * @notice 공통 초기화: 컨트랙트 배포 및 루트 민터 권한 부여
+     * @dev
+     *  - `owner=address(this)`로 테스트 컨트랙트 자체를 오너로 사용합니다.
+     *  - `alice`, `bob`은 테스트 시나리오에 따라 소유자/관리자/호출자 역할을 수행합니다.
+     */
     function setUp() public {
         owner = address(this);
         alice = makeAddr("alice");
@@ -21,6 +37,12 @@ contract RevisionNFT6150Test is Test {
         rev.setRootMinter(owner, true);
     }
 
+    /**
+     * @notice 루트/자식 민트 및 기본 조회 기능 검증
+     * @dev
+     *  - r1 루트 민트 → 소유/루트/리프 여부 확인
+     *  - r1 하위에 c1 자식 민트 → 부모/리프/열거/인덱스 조회 검증
+     */
     function test_MintRootAndChildAndQuery() public {
         uint256 r1 = rev.mintRoot(alice);
         assertEq(r1, 1);
@@ -45,6 +67,13 @@ contract RevisionNFT6150Test is Test {
         assertEq(rev.indexInChildrenEnumeration(r1, c1), 0);
     }
 
+    /**
+     * @notice 부모 변경(ParentTransfer) 기능 및 제약 검증
+     * @dev
+     *  - r1 밑 c1 생성 후, r2를 새 부모로 지정 → 이동 성공
+     *  - 순환 방지: 하위 노드를 부모로 지정하려 할 때 revert
+     *  - self-parent 금지: 자기 자신을 부모로 지정 시 revert
+     */
     function test_TransferParent() public {
         uint256 r1 = rev.mintRoot(alice); // 1
         uint256 c1 = rev.mintChild(alice, r1); // 2
@@ -75,6 +104,12 @@ contract RevisionNFT6150Test is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice 리프 전용 소각 규칙 검증(리프 → OK, 이후 루트도 리프가 되면 OK)
+     * @dev
+     *  - c1(리프) 소각 성공 → r1이 리프가 된 뒤 r1 소각 성공
+     *  - 소각 후 존재하지 않는 토큰 조회 시 revert
+     */
     function test_BurnLeaf_RevertWhenNonLeaf() public {
         uint256 r1 = rev.mintRoot(alice); // 1
         uint256 c1 = rev.mintChild(alice, r1); // 2
@@ -93,6 +128,11 @@ contract RevisionNFT6150Test is Test {
         rev.ownerOf(r1);
     }
 
+    /**
+     * @notice 리프가 아닌 토큰 소각 시 revert 확인
+     * @dev
+     *  - r1 하위에 자식이 존재하는 상태에서 r1 소각 시도 → "Not a leaf"로 revert
+     */
     function test_BurnNonLeafShouldRevert() public {
         uint256 r1 = rev.mintRoot(alice); // 1
         rev.mintChild(alice, r1); // 2
@@ -104,6 +144,11 @@ contract RevisionNFT6150Test is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice 배치 소각 기능 검증
+     * @dev
+     *  - 자식들(c1,c2) 먼저 배치 소각 → r1이 리프가 되면 r1 소각 가능
+     */
     function test_BatchBurn() public {
         uint256 r1 = rev.mintRoot(alice);  // 1
         uint256 c1 = rev.mintChild(alice, r1); // 2
@@ -123,6 +168,13 @@ contract RevisionNFT6150Test is Test {
         rev.safeBurn(r1);
     }
 
+    /**
+     * @notice 접근 제어: 특정 부모 하위 자식 민트 권한(소유자/관리자) 검증
+     * @dev
+     *  - bob은 초기엔 권한 없음 → 민트 시도 시 revert
+     *  - alice가 bob을 r1의 admin으로 등록 → bob이 r1 하위에 민트 가능
+     *  - burn 권한(소유자/관리자/승인자) 확인을 위해 bob이 본인 토큰(c1) 소각
+     */
     function test_AccessControl_CanMintChildrenByOwnerOrAdmin() public {
         uint256 r1 = rev.mintRoot(alice);
         // bob은 현재 권한 없음 → 자식 민트 불가
@@ -145,6 +197,12 @@ contract RevisionNFT6150Test is Test {
         rev.safeBurn(c1);
     }
 
+    /**
+     * @notice 루트 민트 권한 검증(루트 민터 또는 오너만 가능)
+     * @dev
+     *  - alice는 기본적으로 권한 없음 → 민트 시 revert
+     *  - 오너가 alice에 루트 민트 권한 부여 후 → 정상 민트
+     */
     function test_CanMintRootByRootMinterOrOwner() public {
         // alice는 root 민트 권한 없음
         vm.prank(alice);

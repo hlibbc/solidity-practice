@@ -11,7 +11,6 @@ import "./IERC6150.sol";
  *  - 루트 레벨(parentId=0)에 대해서도 동일한 의미(루트 모음)를 갖습니다.
  */
 // Note: the ERC-165 identifier for this interface is 0xba541a2e.
-// interface IERC6150Enumerable is IERC6150 /* IERC721Enumerable */
 interface IERC6150Enumerable is IERC6150 {
     /**
      * @notice `parentId` 하위 자식 토큰 수를 반환합니다.
@@ -28,7 +27,10 @@ interface IERC6150Enumerable is IERC6150 {
      * @param index 0-based 인덱스
      * @return tokenId 해당 위치의 토큰 ID
      */
-    function childOfParentByIndex(uint256 parentId, uint256 index) external view returns (uint256 tokenId);
+    function childOfParentByIndex(
+        uint256 parentId, 
+        uint256 index
+    ) external view returns (uint256 tokenId);
 
     /**
      * @notice `parentId` 하위에서 `tokenId`의 인덱스를 반환합니다.
@@ -37,5 +39,8 @@ interface IERC6150Enumerable is IERC6150 {
      * @param tokenId 자식 토큰 ID
      * @return index 0-based 인덱스
      */
-    function indexInChildrenEnumeration(uint256 parentId, uint256 tokenId) external view returns (uint256 index);
+    function indexInChildrenEnumeration(
+        uint256 parentId, 
+        uint256 tokenId
+    ) external view returns (uint256 index);
 }

@@ -101,7 +101,10 @@ contract MyERC6150 is
     // ── Minting ───────────────────────────────────────────────────────────────
     /**
      * @notice 루트 토큰을 발행합니다.
-     * @dev 호출자는 `_canMintRoot`를 만족해야 합니다.
+     * @dev
+     *  - 권한: `_canMintRoot(msg.sender)`를 만족해야 합니다.
+     *  - Revert:
+     *    - "Not allowed to mint root": 루트 민터/컨트랙트 소유자가 아닌 경우
      * @param to 수령자 주소
      * @return tokenId 발행된 루트 토큰 ID
      */
@@ -112,7 +115,11 @@ contract MyERC6150 is
 
     /**
      * @notice 부모 `parentId` 하위에 자식 토큰을 발행합니다.
-     * @dev 호출자는 `canMintChildren(parentId, msg.sender)`를 만족해야 합니다.
+     * @dev
+     *  - 권한: `canMintChildren(parentId, msg.sender)`를 만족해야 합니다.
+     *  - Revert:
+     *    - "Parent not exist": `parentId`가 존재하지 않음
+     *    - "Not allowed to mint child": 호출자 권한 없음
      * @param to 수령자 주소
      * @param parentId 부모 토큰 ID(존재해야 함)
      * @return tokenId 발행된 자식 토큰 ID
@@ -127,6 +134,11 @@ contract MyERC6150 is
     // 1) 내부 헬퍼 추가
     /**
      * @notice 내부 소각 로직(리프만 허용). 권한/리프 검사를 수행하고 연결을 해제합니다.
+     * @dev
+     *  - Revert:
+     *    - "Invalid token": 존재하지 않는 토큰
+     *    - "Not a leaf": 리프가 아닌 토큰 소각 시도
+     *    - "Not authorized to burn": 권한 없음
      * @param actor 소각 행위자(권한 검사 대상)
      * @param tokenId 소각할 토큰 ID
      */
@@ -201,7 +213,11 @@ contract MyERC6150 is
 
     /**
      * @notice 부모 `tokenId` 하위의 자식 토큰 목록을 반환합니다.
-     * @param tokenId 부모 토큰 ID(0 허용 아님: Core의 childrenOf는 부모 기준)
+     * @dev
+     *  - `tokenId == 0`을 허용합니다. 이 경우 루트들의 자식 배열(`_children[0]`)을 반환합니다.
+     *  - Revert:
+     *    - "Invalid token": `tokenId != 0`이면서 존재하지 않는 경우
+     * @param tokenId 부모 토큰 ID(0 허용: 루트들의 목록은 parentId=0에 매핑)
      * @return childrenIds 자식 토큰 ID 배열
      */
     function childrenOf(uint256 tokenId) public view override returns (uint256[] memory childrenIds) {
@@ -314,6 +330,11 @@ contract MyERC6150 is
 
     /**
      * @notice 특정 `tokenId`에 대해 `account`의 관리자 권한을 설정합니다.
+     * @dev
+     *  - 권한: 토큰 소유자 또는 컨트랙트 소유자만 설정 가능
+     *  - Revert:
+     *    - "Invalid token": 존재하지 않는 토큰
+     *    - "Not token/contract owner": 권한 없음
      * @param tokenId 토큰 ID(존재해야 함)
      * @param account 계정 주소
      * @param allowed 권한 허용 여부
@@ -434,6 +455,15 @@ contract MyERC6150 is
 
     /**
      * @notice 부모 변경 내부 로직(권한/유효성/순환 방지 검증 포함).
+     * @dev
+     *  - 권한: 토큰 소유자/승인자 또는 해당 토큰의 관리자
+     *  - Revert:
+     *    - "Invalid token": 대상 토큰 미존재
+     *    - "Not authorized": 권한 없음
+     *    - "Same parent": 기존 부모와 동일
+     *    - "New parent not exist": 새 부모 지정 시 존재하지 않음
+     *    - "Cannot parent to self": 자기 자신을 부모로 지정
+     *    - "Cannot move under descendant": 자신의 하위로 이동(순환) 시도
      * @param newParentId 새로운 부모 토큰 ID(0 허용)
      * @param tokenId 대상 토큰 ID
      */

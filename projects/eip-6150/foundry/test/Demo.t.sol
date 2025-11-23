@@ -50,6 +50,7 @@ contract RevisionNFT6150Test is Test {
         assertTrue(rev.isRoot(r1));
         assertTrue(rev.isLeaf(r1)); // 아직 자식 없음
 
+        vm.prank(alice);
         uint256 c1 = rev.mintChild(alice, r1);
         assertEq(c1, 2);
         assertEq(rev.ownerOf(c1), alice);
@@ -76,6 +77,7 @@ contract RevisionNFT6150Test is Test {
      */
     function test_TransferParent() public {
         uint256 r1 = rev.mintRoot(alice); // 1
+        vm.prank(alice);
         uint256 c1 = rev.mintChild(alice, r1); // 2
         uint256 r2 = rev.mintRoot(alice); // 3
 
@@ -112,6 +114,7 @@ contract RevisionNFT6150Test is Test {
      */
     function test_BurnLeaf_RevertWhenNonLeaf() public {
         uint256 r1 = rev.mintRoot(alice); // 1
+        vm.prank(alice);
         uint256 c1 = rev.mintChild(alice, r1); // 2
 
         // alice가 c1(leaf) 소각 → OK
@@ -135,6 +138,7 @@ contract RevisionNFT6150Test is Test {
      */
     function test_BurnNonLeafShouldRevert() public {
         uint256 r1 = rev.mintRoot(alice); // 1
+        vm.prank(alice);
         rev.mintChild(alice, r1); // 2
 
         // r1은 leaf 아님 → 소각 시도 시 revert("Not a leaf")
@@ -151,8 +155,10 @@ contract RevisionNFT6150Test is Test {
      */
     function test_BatchBurn() public {
         uint256 r1 = rev.mintRoot(alice);  // 1
+        vm.startPrank(alice);
         uint256 c1 = rev.mintChild(alice, r1); // 2
         uint256 c2 = rev.mintChild(alice, r1); // 3
+        vm.stopPrank();
 
         // leaf만 소각 가능 → 먼저 c1, c2 를 배치 소각
         uint256[] memory ids = new uint256[](2);
@@ -175,24 +181,26 @@ contract RevisionNFT6150Test is Test {
      *  - alice가 bob을 r1의 admin으로 등록 → bob이 r1 하위에 민트 가능
      *  - burn 권한(소유자/관리자/승인자) 확인을 위해 bob이 본인 토큰(c1) 소각
      */
-    function test_AccessControl_CanMintChildrenByOwnerOrAdmin() public {
+    function test_OnlyRootOwnerCanMintChildren() public {
         uint256 r1 = rev.mintRoot(alice);
-        // bob은 현재 권한 없음 → 자식 민트 불가
+        // bob은 r1 하위 자식 민트 불가(루트 소유자가 아님)
         vm.prank(bob);
         vm.expectRevert(bytes("Not allowed to mint child"));
         rev.mintChild(bob, r1);
 
-        // alice가 bob을 r1의 admin으로 등록
+        // 루트 소유자 alice는 r1 하위 자식 민트 가능 (수령자는 bob)
         vm.prank(alice);
-        rev.setTokenAdmin(r1, bob, true);
-
-        // 이제 bob은 r1 아래에 민트 가능
-        vm.prank(bob);
         uint256 c1 = rev.mintChild(bob, r1);
         assertEq(rev.ownerOf(c1), bob);
 
-        // burn 권한: owner/admin/approved
-        // bob이 본인 토큰(c1) 소각 OK
+        // bob을 admin으로 등록해도 민트 권한은 부여되지 않음(여전히 루트 소유자만)
+        vm.prank(alice);
+        rev.setTokenAdmin(r1, bob, true);
+        vm.prank(bob);
+        vm.expectRevert(bytes("Not allowed to mint child"));
+        rev.mintChild(bob, r1);
+
+        // bob은 본인 소유 토큰(c1) 소각 가능(소유/승인/관리자 권한)
         vm.prank(bob);
         rev.safeBurn(c1);
     }
@@ -203,16 +211,8 @@ contract RevisionNFT6150Test is Test {
      *  - alice는 기본적으로 권한 없음 → 민트 시 revert
      *  - 오너가 alice에 루트 민트 권한 부여 후 → 정상 민트
      */
-    function test_CanMintRootByRootMinterOrOwner() public {
-        // alice는 root 민트 권한 없음
-        vm.prank(alice);
-        vm.expectRevert(bytes("Not allowed to mint root"));
-        rev.mintRoot(alice);
-
-        // owner가 alice에 root 민트 권한 부여
-        rev.setRootMinter(alice, true);
-
-        // 이제 alice가 루트 민트 가능
+    function test_CanMintRootByAnyone() public {
+        // 누구나 루트 민트 가능
         vm.prank(alice);
         uint256 rA = rev.mintRoot(alice);
         assertEq(rev.ownerOf(rA), alice);

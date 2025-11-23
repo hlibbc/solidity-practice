@@ -102,14 +102,11 @@ contract MyERC6150 is
     /**
      * @notice 루트 토큰을 발행합니다.
      * @dev
-     *  - 권한: `_canMintRoot(msg.sender)`를 만족해야 합니다.
-     *  - Revert:
-     *    - "Not allowed to mint root": 루트 민터/컨트랙트 소유자가 아닌 경우
+     *  - 누구나 루트(창작물의 리비전1)를 발행할 수 있습니다.
      * @param to 수령자 주소
      * @return tokenId 발행된 루트 토큰 ID
      */
     function mintRoot(address to) external returns (uint256 tokenId) {
-        require(_canMintRoot(_msgSender()), "Not allowed to mint root");
         tokenId = _mintWithParent(to, 0);
     }
 
@@ -300,11 +297,9 @@ contract MyERC6150 is
      * @return canMint 발행 가능하면 true
      */
     function canMintChildren(uint256 parentId, address account) public view override returns (bool) {
-        if (parentId == 0) {
-            return _canMintRoot(account);
-        }
         require(_exists6150(parentId), "Invalid parent");
-        return _isAdmin(parentId, account) || ownerOf(parentId) == account;
+        uint256 rootId = _rootOf(parentId);
+        return ownerOf(rootId) == account;
     }
 
     /**
@@ -341,7 +336,7 @@ contract MyERC6150 is
      */
     function setTokenAdmin(uint256 tokenId, address account, bool allowed) external {
         require(_exists6150(tokenId), "Invalid token");
-        require(ownerOf(tokenId) == _msgSender() || owner() == _msgSender(), "Not token/contract owner");
+        require(ownerOf(tokenId) == _msgSender(), "Not token owner");
         _tokenAdmins[tokenId][account] = allowed;
     }
 
@@ -426,7 +421,7 @@ contract MyERC6150 is
      * @return isAdmin 관리자면 true
      */
     function _isAdmin(uint256 tokenId, address account) internal view returns (bool) {
-        return ownerOf(tokenId) == account || owner() == account || _tokenAdmins[tokenId][account];
+        return ownerOf(tokenId) == account || _tokenAdmins[tokenId][account];
     }
 
     /**
@@ -435,7 +430,8 @@ contract MyERC6150 is
      * @return allowed 루트 발행 가능하면 true
      */
     function _canMintRoot(address account) internal view returns (bool) {
-        return account == owner() || _rootMinters[account];
+        // Deprecated in ipkeepers: 루트 민트는 누구나 가능. 하위 호환을 위해 함수는 유지.
+        return true;
     }
 
     /**
@@ -451,6 +447,20 @@ contract MyERC6150 is
             p = _parent[p];
         }
         return false;
+    }
+
+    /**
+     * @notice 주어진 토큰의 루트 조상 ID를 반환합니다.
+     * @param tokenId 기준 토큰 ID
+     * @return rootId 루트 토큰 ID
+     */
+    function _rootOf(uint256 tokenId) internal view returns (uint256 rootId) {
+        require(_exists6150(tokenId), "Invalid token");
+        uint256 current = tokenId;
+        while (_parent[current] != 0) {
+            current = _parent[current];
+        }
+        return current;
     }
 
     /**

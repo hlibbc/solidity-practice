@@ -10,7 +10,6 @@ pragma solidity ^0.8.20;
  *  - 구현 컨트랙트는 ERC-165를 통해 본 인터페이스 지원을 선언해야 합니다.
  */
 // Note: the ERC-165 identifier for this interface is 0x897e2c73.
-// interface IERC6150 /* is IERC721, IERC165 */
 interface IERC6150 {
     /**
      * @notice 부모 `parentId` 하위에 `tokenId` 토큰이 발행될 때 발생합니다.

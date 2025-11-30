@@ -11,7 +11,6 @@ import "./IERC6150.sol";
  *  - 구현체는 리프 여부 검사를 필수로 수행해야 하며, 권한 체크를 통해 안전하게 소각되어야 합니다.
  */
 // Note: the ERC-165 identifier for this interface is 0x4ac0aa46.
-// interface IERC6150Burnable is IERC6150
 interface IERC6150Burnable is IERC6150 {
     /**
      * @notice `tokenId`를 소각합니다(리프 토큰만 허용).

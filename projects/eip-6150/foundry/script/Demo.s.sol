@@ -4,7 +4,26 @@ pragma solidity ^0.8.20;
 import "forge-std/Script.sol";
 import {MyERC6150} from "../../contracts/MyERC6150.sol";
 
+/**
+ * @title DeployAndDemo - ERC-6150 데모 배포/시연 스크립트
+ * @notice
+ *  - Foundry Script를 이용해 `MyERC6150`을 배포하고, 루트/자식 민트, 소각, 부모 변경 동작을 순차적으로 시연합니다.
+ * @dev
+ *  - 브로드캐스트 키는 환경변수 `PRIVATE_KEY`에서 읽습니다.
+ *  - `forge script` 실행 시 `--broadcast` 옵션을 주면 실제 트랜잭션이 브로드캐스트됩니다.
+ *  - 출력 로그는 `console2.log`를 통해 확인할 수 있습니다.
+ * @custom:usage
+ *  1) .env에 PRIVATE_KEY 설정
+ *  2) 로컬 노드 실행 후: `forge script foundry/script/Demo.s.sol:DeployAndDemo --rpc-url http://127.0.0.1:8545 --broadcast`
+ *  3) 또는 드라이런: `forge script foundry/script/Demo.s.sol:DeployAndDemo --rpc-url http://127.0.0.1:8545`
+ */
 contract DeployAndDemo is Script {
+    /**
+     * @notice 스크립트 진입점. 배포 → 권한 설정 → 민트/소각/부모변경 데모를 수행합니다.
+     * @dev
+     *  - 환경변수 `PRIVATE_KEY`를 읽어 브로드캐스트를 시작/종료합니다.
+     *  - 각 단계별로 상태를 로그로 출력합니다.
+     */
     function run() external {
         // 브로드캐스트 시작
         uint256 pk = vm.envUint("PRIVATE_KEY");

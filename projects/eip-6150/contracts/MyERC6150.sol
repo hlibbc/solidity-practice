@@ -10,6 +10,31 @@ pragma solidity ^0.8.20;
  *  - OZ v5.x의 내부 API에 맞춘 래퍼 함수를 포함합니다(`_exists6150`, `_isApprovedOrOwner6150`).
  *  - 저장소 설계: `_parent`, `_children`, `_childIndex`로 계층 구조를 추적합니다.
  *  - 이벤트: 인터페이스에 정의된 `Minted`, `ParentTransferred`를 사용해 상위 호환을 유지합니다.
+ *
+ *  [설계]
+ *  - Core: 부모/자식/루트/리프 관계를 유지하는 기본 뷰를 제공합니다.
+ *  - Enumerable: 특정 부모 하위의 자식 개수/인덱스 접근을 제공합니다.
+ *  - Burnable: 리프 토큰만 안전하게 소각할 수 있습니다(연결 정리 포함).
+ *  - ParentTransferable: 부모 변경(루트 승격 포함) 기능을 제공합니다.
+ *  - AccessControl(뷰): 토큰별 관리자 권한 조회, 발행/소각 가능 여부 조회를 제공합니다.
+ *
+ *  [사용법]
+ *  - 루트 발행: `mintRoot(to)` (컨트랙트 소유자 또는 허용된 루트 민터만)
+ *  - 자식 발행: `mintChild(to, parentId)` (해당 부모의 소유자 또는 관리자만)
+ *  - 부모 변경: `transferParent(newParentId, tokenId)` (권한 필요, 순환/자기부모 금지)
+ *  - 소각: `safeBurn(tokenId)` 또는 `safeBatchBurn(tokenIds)` (리프만 허용)
+ *
+ *  [권한]
+ *  - 루트 발행 권한은 컨트랙트 소유자 또는 `setRootMinter`로 허용된 계정에 부여됩니다.
+ *  - 특정 토큰의 관리자 권한은 토큰 소유자 또는 컨트랙트 소유자가 `setTokenAdmin`으로 위임할 수 있습니다.
+ *
+ *  [보안]
+ *  - 부모 변경 시 순환 참조 방지(`_isDescendant`), 자기 자신을 부모로 지정 금지, 존재성 검사를 수행합니다.
+ *  - 소각은 리프에 한정되며, 권한 검사를 통해 안전하게 처리됩니다.
+ *
+ *  [가스/제한]
+ *  - 자식 목록 `_children[parent]`은 동적 배열로, 빈번한 삽입/삭제 시 가스 비용이 증가할 수 있습니다.
+ *  - 삭제는 스왑-팝을 사용하여 O(1)로 처리하지만, 자식의 순서는 보장되지 않습니다.
  */
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
@@ -76,18 +101,22 @@ contract MyERC6150 is
     // ── Minting ───────────────────────────────────────────────────────────────
     /**
      * @notice 루트 토큰을 발행합니다.
-     * @dev 호출자는 `_canMintRoot`를 만족해야 합니다.
+     * @dev
+     *  - 누구나 루트(창작물의 리비전1)를 발행할 수 있습니다.
      * @param to 수령자 주소
      * @return tokenId 발행된 루트 토큰 ID
      */
     function mintRoot(address to) external returns (uint256 tokenId) {
-        require(_canMintRoot(_msgSender()), "Not allowed to mint root");
         tokenId = _mintWithParent(to, 0);
     }
 
     /**
      * @notice 부모 `parentId` 하위에 자식 토큰을 발행합니다.
-     * @dev 호출자는 `canMintChildren(parentId, msg.sender)`를 만족해야 합니다.
+     * @dev
+     *  - 권한: `canMintChildren(parentId, msg.sender)`를 만족해야 합니다.
+     *  - Revert:
+     *    - "Parent not exist": `parentId`가 존재하지 않음
+     *    - "Not allowed to mint child": 호출자 권한 없음
      * @param to 수령자 주소
      * @param parentId 부모 토큰 ID(존재해야 함)
      * @return tokenId 발행된 자식 토큰 ID
@@ -102,6 +131,11 @@ contract MyERC6150 is
     // 1) 내부 헬퍼 추가
     /**
      * @notice 내부 소각 로직(리프만 허용). 권한/리프 검사를 수행하고 연결을 해제합니다.
+     * @dev
+     *  - Revert:
+     *    - "Invalid token": 존재하지 않는 토큰
+     *    - "Not a leaf": 리프가 아닌 토큰 소각 시도
+     *    - "Not authorized to burn": 권한 없음
      * @param actor 소각 행위자(권한 검사 대상)
      * @param tokenId 소각할 토큰 ID
      */
@@ -176,7 +210,11 @@ contract MyERC6150 is
 
     /**
      * @notice 부모 `tokenId` 하위의 자식 토큰 목록을 반환합니다.
-     * @param tokenId 부모 토큰 ID(0 허용 아님: Core의 childrenOf는 부모 기준)
+     * @dev
+     *  - `tokenId == 0`을 허용합니다. 이 경우 루트들의 자식 배열(`_children[0]`)을 반환합니다.
+     *  - Revert:
+     *    - "Invalid token": `tokenId != 0`이면서 존재하지 않는 경우
+     * @param tokenId 부모 토큰 ID(0 허용: 루트들의 목록은 parentId=0에 매핑)
      * @return childrenIds 자식 토큰 ID 배열
      */
     function childrenOf(uint256 tokenId) public view override returns (uint256[] memory childrenIds) {
@@ -259,11 +297,9 @@ contract MyERC6150 is
      * @return canMint 발행 가능하면 true
      */
     function canMintChildren(uint256 parentId, address account) public view override returns (bool) {
-        if (parentId == 0) {
-            return _canMintRoot(account);
-        }
         require(_exists6150(parentId), "Invalid parent");
-        return _isAdmin(parentId, account) || ownerOf(parentId) == account;
+        uint256 rootId = _rootOf(parentId);
+        return ownerOf(rootId) == account;
     }
 
     /**
@@ -289,13 +325,18 @@ contract MyERC6150 is
 
     /**
      * @notice 특정 `tokenId`에 대해 `account`의 관리자 권한을 설정합니다.
+     * @dev
+     *  - 권한: 토큰 소유자 또는 컨트랙트 소유자만 설정 가능
+     *  - Revert:
+     *    - "Invalid token": 존재하지 않는 토큰
+     *    - "Not token/contract owner": 권한 없음
      * @param tokenId 토큰 ID(존재해야 함)
      * @param account 계정 주소
      * @param allowed 권한 허용 여부
      */
     function setTokenAdmin(uint256 tokenId, address account, bool allowed) external {
         require(_exists6150(tokenId), "Invalid token");
-        require(ownerOf(tokenId) == _msgSender() || owner() == _msgSender(), "Not token/contract owner");
+        require(ownerOf(tokenId) == _msgSender(), "Not token owner");
         _tokenAdmins[tokenId][account] = allowed;
     }
 
@@ -380,16 +421,7 @@ contract MyERC6150 is
      * @return isAdmin 관리자면 true
      */
     function _isAdmin(uint256 tokenId, address account) internal view returns (bool) {
-        return ownerOf(tokenId) == account || owner() == account || _tokenAdmins[tokenId][account];
-    }
-
-    /**
-     * @notice 루트 발행 가능 여부(컨트랙트 소유자 또는 허용된 루트 민터).
-     * @param account 계정 주소
-     * @return allowed 루트 발행 가능하면 true
-     */
-    function _canMintRoot(address account) internal view returns (bool) {
-        return account == owner() || _rootMinters[account];
+        return ownerOf(tokenId) == account || _tokenAdmins[tokenId][account];
     }
 
     /**
@@ -408,7 +440,30 @@ contract MyERC6150 is
     }
 
     /**
+     * @notice 주어진 토큰의 루트 조상 ID를 반환합니다.
+     * @param tokenId 기준 토큰 ID
+     * @return rootId 루트 토큰 ID
+     */
+    function _rootOf(uint256 tokenId) internal view returns (uint256 rootId) {
+        require(_exists6150(tokenId), "Invalid token");
+        uint256 current = tokenId;
+        while (_parent[current] != 0) {
+            current = _parent[current];
+        }
+        return current;
+    }
+
+    /**
      * @notice 부모 변경 내부 로직(권한/유효성/순환 방지 검증 포함).
+     * @dev
+     *  - 권한: 토큰 소유자/승인자 또는 해당 토큰의 관리자
+     *  - Revert:
+     *    - "Invalid token": 대상 토큰 미존재
+     *    - "Not authorized": 권한 없음
+     *    - "Same parent": 기존 부모와 동일
+     *    - "New parent not exist": 새 부모 지정 시 존재하지 않음
+     *    - "Cannot parent to self": 자기 자신을 부모로 지정
+     *    - "Cannot move under descendant": 자신의 하위로 이동(순환) 시도
      * @param newParentId 새로운 부모 토큰 ID(0 허용)
      * @param tokenId 대상 토큰 ID
      */

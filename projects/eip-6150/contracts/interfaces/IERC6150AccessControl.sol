@@ -11,7 +11,6 @@ import "./IERC6150.sol";
  *  - 읽기 전용 뷰만 정의하며, 설정/변경은 구현 컨트랙트의 권한 모델에 따릅니다.
  */
 // Note: the ERC-165 identifier for this interface is 0x1d04f0b3.
-// interface IERC6150AccessControl is IERC6150
 interface IERC6150AccessControl is IERC6150 {
     /**
      * @notice `account`가 `tokenId`의 관리자(admin)인지 확인합니다.
@@ -19,7 +18,10 @@ interface IERC6150AccessControl is IERC6150 {
      * @param account 계정 주소
      * @return isAdmin 관리자 권한이면 true
      */
-    function isAdminOf(uint256 tokenId, address account) external view returns (bool isAdmin);
+    function isAdminOf(
+        uint256 tokenId, 
+        address account
+    ) external view returns (bool isAdmin);
 
     /**
      * @notice `account`가 `parentId` 하위에 자식 발행이 가능한지 확인합니다.
@@ -28,7 +30,10 @@ interface IERC6150AccessControl is IERC6150 {
      * @param account 계정 주소
      * @return canMint 발행 가능하면 true
      */
-    function canMintChildren(uint256 parentId, address account) external view returns (bool canMint);
+    function canMintChildren(
+        uint256 parentId, 
+        address account
+    ) external view returns (bool canMint);
 
     /**
      * @notice `account`가 `tokenId`를 소각할 수 있는지 확인합니다.
@@ -36,5 +41,8 @@ interface IERC6150AccessControl is IERC6150 {
      * @param account 계정 주소
      * @return canBurn 소각 가능하면 true
      */
-    function canBurnTokenByAccount(uint256 tokenId, address account) external view returns (bool canBurn);
+    function canBurnTokenByAccount(
+        uint256 tokenId, 
+        address account
+    ) external view returns (bool canBurn);
 }

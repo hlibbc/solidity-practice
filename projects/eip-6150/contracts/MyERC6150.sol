@@ -425,16 +425,6 @@ contract MyERC6150 is
     }
 
     /**
-     * @notice 루트 발행 가능 여부(컨트랙트 소유자 또는 허용된 루트 민터).
-     * @param account 계정 주소
-     * @return allowed 루트 발행 가능하면 true
-     */
-    function _canMintRoot(address account) internal view returns (bool) {
-        // Deprecated in ipkeepers: 루트 민트는 누구나 가능. 하위 호환을 위해 함수는 유지.
-        return true;
-    }
-
-    /**
      * @notice `candidateId`가 `ancestorId`의 후손인지 여부를 검사합니다.
      * @param ancestorId 조상 토큰 ID
      * @param candidateId 후보 토큰 ID

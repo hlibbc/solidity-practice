@@ -205,17 +205,46 @@ contract RevisionNFT6150Test is Test {
         rev.safeBurn(c1);
     }
 
+    // test_CanMintRootByAnyone: 확장 케이스(test_CanMintRootByAnyone_Extended)로 대체됨
+
     /**
-     * @notice 루트 민트 권한 검증(루트 민터 또는 오너만 가능)
+     * @notice 루트 민트 정책 강화 검증
      * @dev
-     *  - alice는 기본적으로 권한 없음 → 민트 시 revert
-     *  - 오너가 alice에 루트 민트 권한 부여 후 → 정상 민트
+     *  - 서로 다른 EOA가 각각 자유롭게 루트 민트 가능
+     *  - 수령자(to) 임의 지정 가능
+     *  - setRootMinter(true/false)와 무관하게 항상 가능
+     *  - 컨트랙트 owner의 특권 경로 없음(자식 민트 권한에도 영향 없음)
      */
     function test_CanMintRootByAnyone() public {
-        // 누구나 루트 민트 가능
+        // alice가 bob에게 루트 민트(to override)
         vm.prank(alice);
-        uint256 rA = rev.mintRoot(alice);
-        assertEq(rev.ownerOf(rA), alice);
-        assertTrue(rev.isRoot(rA));
+        uint256 r1 = rev.mintRoot(bob);
+        assertTrue(rev.isRoot(r1));
+        assertEq(rev.ownerOf(r1), bob);
+
+        // bob이 alice에게 루트 민트
+        vm.prank(bob);
+        uint256 r2 = rev.mintRoot(alice);
+        assertTrue(rev.isRoot(r2));
+        assertEq(rev.ownerOf(r2), alice);
+
+        // setRootMinter로 권한을 꺼도(또는 켜도) 루트 민트에는 영향 없음
+        rev.setRootMinter(alice, false);
+        rev.setRootMinter(bob, false);
+
+        vm.prank(alice);
+        uint256 r3 = rev.mintRoot(alice);
+        assertTrue(rev.isRoot(r3));
+        assertEq(rev.ownerOf(r3), alice);
+
+        vm.prank(bob);
+        uint256 r4 = rev.mintRoot(bob);
+        assertTrue(rev.isRoot(r4));
+        assertEq(rev.ownerOf(r4), bob);
+
+        // 컨트랙트 owner는 루트 소유자가 아니므로 alice의 루트 하위 자식 민트 불가
+        // (특권 경로 없음)
+        vm.expectRevert(bytes("Not allowed to mint child"));
+        rev.mintChild(address(this), r2);
     }
 }

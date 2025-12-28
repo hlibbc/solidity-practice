@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./interface/IEscrowFeeResolver.sol";
 
 /**
  * @title Escrow
@@ -40,7 +41,7 @@ contract Escrow {
         Created, // 컨트랙트 생성 및 입금 확인 단계
         Ready, // 출금 요청 상태
         Locked, // 강제 락업 상태
-        Withdrawned, // 출금 완료 상태
+        Resolved, // 출금 정책 확정 상태
         Max
     }
 
@@ -51,6 +52,17 @@ contract Escrow {
     error InvalidAmount(); // 잘못된 금액
     error InvalidState(); // 잘못된 상태 (enum State)
     error FinalizeWindowNotPassed(); // 확정기간이 지나지 않았음
+    error FinalizeWindowExpired(); // 확정기간이 이미 지났음
+    /**
+     * @notice resolve 함수 arguments 에러 정의: 
+     * @dev
+     *  - recipientNum: 수취자 주소 배열 크기
+     *  - amountsNum: 수취자 금액 배열 크기
+     */
+    error InvalidResolveArgs(
+        uint256 recipientNum, 
+        uint256 amountsNum
+    );
 
     /// Def. event
     /**
@@ -66,19 +78,53 @@ contract Escrow {
     /**
      * @notice 
      */
-    event EscrowConfirmed(address indexed token, uint256 amount);
+    event EscrowConfirmed(
+        address indexed token, 
+        uint256 amount
+    );
     /**
      * @notice 
      */
-    event UnlockRequested(address indexed beneficiary, uint64 completedAt);
+    event UnlockRequested(
+        address indexed beneficiary, 
+        uint64 completedAt
+    );
     /**
      * @notice 
      */
-    event EscrowLockForced(address indexed depositor, uint64 forceLockedAt);
+    event EscrowLockForced(
+        address indexed depositor, 
+        uint64 forceLockedAt
+    );
     /**
      * @notice 
      */
-    event Withdrawn(address indexed token, address indexed beneficiary, uint256 amount);
+    event PayoutDefined(
+        address indexed escrowAddr,
+        address indexed token,
+        uint256 grossAmount,
+        uint256 platformFee,
+        uint256 netAmount,
+        uint256 allocationCount
+    );
+    /**
+     * @notice 
+     */
+    event AllocationSet(
+        address indexed escrowAddr,
+        address indexed token,
+        address indexed recipient,
+        uint256 amount
+    );
+    /**
+     * @notice 
+     */
+    event Claimed(
+        address indexed escrowAddr,
+        address indexed token,
+        address indexed recipient,
+        uint256 amount
+    );
 
     /// Def. variable
     address public main;
@@ -89,8 +135,9 @@ contract Escrow {
     State public state;
 
     uint64 public completedAt; // timestamp when work completed
-
     uint64 public constant FINALIZATION_DELAY = 7 days;
+
+    mapping(address => uint256) public claimableAmounts;
 
     bool private initialized;
 
@@ -143,19 +190,13 @@ contract Escrow {
         emit Initialized(_token, _depositor, _beneficiary, _amount);
     }
 
-    // =============================================================================
-    // 상태 전이(메인 컨트랙트 전용)
-    // =============================================================================
     /**
-     * @notice (Bookkeeping) 토큰이 실제로 이 에스크로에 락 되었는지 검증하고 이벤트를 남깁니다.
-     * @dev `Main`이 `transferFrom(depositor -> escrow, amount)`까지 끝낸 뒤 호출해야 합니다.
-     *
-     * - 이 함수는 **감사/인덱싱 목적**의 검증/이벤트 기록용입니다.
-     * - 현재 구현에서는 state를 `Locked`로 바꾸지 않고, `Created` 상태를 유지합니다.
-     *
-     * Revert 조건:
-     *  - state != Created
-     *  - escrow 잔고 != amount
+     * @notice 토큰이 실제로 이 에스크로에 락 되었는지 검증하고 이벤트를 남깁니다.
+     * @dev 
+     *  `Main`이 `transferFrom(depositor -> escrow, amount)`까지 끝낸 뒤 호출해야 합니다.
+     *  Revert 조건:
+     *   - state != Created
+     *   - escrow 잔고 != amount
      */
     function confirmLock() external onlyMain {
         if (state != State.Created) {
@@ -189,6 +230,9 @@ contract Escrow {
         if (state != State.Ready) {
             revert InvalidState();
         }
+        if (block.timestamp > uint256(completedAt) + uint256(FINALIZATION_DELAY)) {
+            revert FinalizeWindowExpired();
+        }
         state = State.Locked;
 
         emit EscrowLockForced(depositor, uint64(block.timestamp));
@@ -199,19 +243,123 @@ contract Escrow {
      * @dev 허용 조건(모두 만족):
      *  - state == Ready
      *  - block.timestamp >= completedAt + FINALIZATION_DELAY
+     * 
+     * 누구나 호출가능해야 함
      */
-    function claim() external onlyMain {
-        if (state != State.Ready) {
-            revert InvalidState();
-        }
+    function claim() external {
         if (block.timestamp < uint256(completedAt) + uint256(FINALIZATION_DELAY)) {
             revert FinalizeWindowNotPassed();
         }
+        if (state == State.Ready) {
+            bytes memory data = abi.encodeWithSelector(
+                IEscrowFeeResolver.getPlatformFee.selector,
+                address(this),
+                token,
+                amount
+            );
 
-        state = State.Withdrawned;
+            (bool success, bytes memory ret) = main.staticcall(data);
+            if (!success || ret.length != 32) {
+                revert PlatformFeeQueryFailed();
+            }
 
-        IERC20(token).safeTransfer(beneficiary, amount);
+            uint256 platformFee = abi.decode(ret, (uint256));
+            if (platformFee > amount) {
+                revert InvalidPlatformFee();
+            }
+            claimableAmounts[beneficiary] = amount - platformFee;
+            uint256 claimableAmount = claimableAmounts[beneficiary];
+            emit PayoutDefined(
+                address(this),
+                token,
+                amount,
+                platformFee,
+                claimableAmount,
+                1
+            );
+            emit AllocationSet(
+                address(this),
+                token,
+                beneficiary,
+                claimableAmount
+            );
+            state = State.Resolved;
+        }
+        if (state == State.Resolved) {
+            uint256 claimableAmount = claimableAmounts[address(msg.sender)];
+            if (claimableAmount > 0) {
+                IERC20(token).safeTransfer(address(msg.sender), claimableAmount);
+                emit Claimed(
+                    address(this),
+                    token,
+                    address(msg.sender),
+                    claimableAmount
+                );
+                claimableAmounts[address(msg.sender)] = 0;
+            }
+        } else {
+            revert InvalidState();
+        }
+    }
 
-        emit Withdrawn(token, beneficiary, amount);
+    /**
+     * @notice forceLock이 발동되어 Locked된 자산을 해결합니다.
+     * @param recipients 자산을 분배받을 주소들
+     * @param amounts 분배받을 자산 금액
+     * @dev 허용 조건(모두 만족):
+     *  - onlyMain
+     *  - state == Locked
+     *  - recipients.length > 0
+     *  - amount == sum(amounts) + platformFee
+     *  - recipients.length == amounts.length
+     */
+    function resolve(address[] recipients, address[] amounts) external onlyMain {
+        if (state != State.Locked) {
+            revert InvalidState();
+        }
+        if (recipients.length == 0 || (recipients.length != amounts.length)) {
+            revert InvalidResolveArgs(recipients.length, amounts.length);
+        }
+        bytes memory data = abi.encodeWithSelector(
+            IEscrowFeeResolver.getPlatformFee.selector,
+            address(this),
+            token,
+            amount
+        );
+
+        (bool success, bytes memory ret) = main.staticcall(data);
+        if (!success || ret.length != 32) {
+            revert PlatformFeeQueryFailed();
+        }
+
+        uint256 platformFee = abi.decode(ret, (uint256));
+        if (platformFee > amount) {
+            revert InvalidPlatformFee();
+        }
+        uint256 claimableAmount = amount - platformFee;
+        emit PayoutDefined(
+            address(this),
+            token,
+            amount,
+            platformFee,
+            claimableAmount,
+            recipients.length
+        );
+        uint256 accumulatedAmount = 0;
+        for (uint i = 0; i < recipients.length; i++) {
+            accumulatedAmount += amounts[i];
+            emit AllocationSet(
+                address(this),
+                token,
+                recipients[i],
+                amounts[i]
+            );
+            claimableAmounts[recipients[i]] = amounts[i];
+        }
+        if (accumulatedAmount + platformFee != amount) {
+            revert InvalidAmount();
+        }
+
+        state = State.Resolved;
     }
 }

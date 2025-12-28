@@ -1,0 +1,6 @@
+[profile.default]
+src = "contracts"
+test = "foundry/test"
+out = "foundry/out"
+libs = ["lib"]
+auto_detect_remappings = true

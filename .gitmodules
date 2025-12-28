@@ -179,3 +179,15 @@
 [submodule "projects/eip-7053/lib/openzeppelin-contracts"]
 	path = projects/eip-7053/lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/eip-5528/lib/forge-std"]
+	path = projects/eip-5528/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/eip-5528/lib/openzeppelin-contracts"]
+	path = projects/eip-5528/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "projects/single-escrow/lib/forge-std"]
+	path = projects/single-escrow/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "projects/single-escrow/lib/openzeppelin-contracts"]
+	path = projects/single-escrow/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts

@@ -462,7 +462,7 @@ contract Escrow {
         uint256 grossAmount
     ) internal view returns (uint256 fee) {
         bytes memory data = abi.encodeWithSelector(
-            IEscrowFeeResolver.escrowFee.selector,
+            IEscrowFeeResolver.getEscrowFee.selector,
             address(this),
             _token,
             grossAmount
